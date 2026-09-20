@@ -1,0 +1,2607 @@
+'use client';
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+import {
+  getVideos,
+  createVideo,
+  updateVideo,
+  deleteVideo,
+  getPlaylists,
+  createPlaylist,
+  updatePlaylist,
+  deletePlaylist,
+  getSiteSettings,
+  updateSiteSettings,
+  seedInitialDataToFirestore,
+  getSections,
+  assignVideoSections,
+} from '@/lib/videoService';
+import { detectDurationFromFile, detectDurationFromUrl } from '@/lib/formatters';
+import { Video, Playlist, SiteSettings, VideoVisibility, VideoStatus, VideoSourceType, Section } from '@/lib/types';
+import { formatDuration, formatViews, formatTimeAgo } from '@/components/VideoCard';
+import { AdminSectionManager } from '@/components/admin/AdminSectionManager';
+import { AdminBrandingManager } from '@/components/admin/AdminBrandingManager';
+import { AdminAdManager } from '@/components/admin/AdminAdManager';
+import { SectionIcon } from '@/components/SectionIcon';
+import {
+  LayoutDashboard,
+  Film,
+  Upload,
+  Link2,
+  ListVideo,
+  Users,
+  Settings as SettingsIcon,
+  UserCheck,
+  LogOut,
+  Plus,
+  Trash2,
+  Edit,
+  Eye,
+  CheckCircle2,
+  AlertCircle,
+  Search,
+  Filter,
+  ArrowUpDown,
+  Play,
+  X,
+  Copy,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  ShieldAlert,
+  Save,
+  Radio,
+  Clock,
+  ExternalLink,
+  ArrowUp,
+  ArrowDown,
+  Layers,
+  Palette,
+  Megaphone,
+  Loader2,
+} from 'lucide-react';
+
+type AdminTab =
+  | 'dashboard'
+  | 'sections'
+  | 'branding'
+  | 'monetization'
+  | 'library'
+  | 'upload'
+  | 'import'
+  | 'playlists'
+  | 'users'
+  | 'settings'
+  | 'profile';
+
+export default function AdminPage() {
+  const router = useRouter();
+  const { user, isAdmin, loading: authLoading, logout, claimAdminAccess, loginWithEmail, loginWithGoogle } = useAuth();
+
+  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
+  const [loadingData, setLoadingData] = useState(true);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Admin Login specific states (if not authenticated)
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminLoginError, setAdminLoginError] = useState<string | null>(null);
+  const [adminLoggingIn, setAdminLoggingIn] = useState(false);
+
+  // Library filters
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | VideoStatus>('all');
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | VideoVisibility>('all');
+  const [playlistFilter, setPlaylistFilter] = useState<string>('all');
+  const [sectionFilter, setSectionFilter] = useState<string>('all');
+  const [libraryPage, setLibraryPage] = useState(1);
+  const itemsPerPage = 8;
+
+  // Modals
+  const [previewVideo, setPreviewVideo] = useState<Video | null>(null);
+  const [editingVideo, setEditingVideo] = useState<Video | null>(null);
+  const [deletingVideo, setDeletingVideo] = useState<Video | null>(null);
+
+  // Duration Detection & Section Assignment States
+  const [isDetectingDuration, setIsDetectingDuration] = useState(false);
+
+  // Upload Form State
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadDesc, setUploadDesc] = useState('');
+  const [uploadThumbnail, setUploadThumbnail] = useState('');
+  const [uploadVideoFile, setUploadVideoFile] = useState<File | null>(null);
+  const [uploadPlaylistId, setUploadPlaylistId] = useState('');
+  const [uploadVisibility, setUploadVisibility] = useState<VideoVisibility>('public');
+  const [uploadStatus, setUploadStatus] = useState<VideoStatus>('published');
+  const [uploadTags, setUploadTags] = useState('');
+  const [uploadCategory, setUploadCategory] = useState('General');
+  const [uploadSectionIds, setUploadSectionIds] = useState<string[]>([]);
+  const [uploadDurationSeconds, setUploadDurationSeconds] = useState<number>(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadCancelled, setUploadCancelled] = useState(false);
+
+  // Import Form State
+  const [importUrl, setImportUrl] = useState('');
+  const [importTitle, setImportTitle] = useState('');
+  const [importDesc, setImportDesc] = useState('');
+  const [importThumbnail, setImportThumbnail] = useState('');
+  const [importPlaylistId, setImportPlaylistId] = useState('');
+  const [importVisibility, setImportVisibility] = useState<VideoVisibility>('public');
+  const [importStatus, setImportStatus] = useState<VideoStatus>('published');
+  const [importCategory, setImportCategory] = useState('Technology');
+  const [importTags, setImportTags] = useState('Stream, HD');
+  const [importSectionIds, setImportSectionIds] = useState<string[]>([]);
+  const [importDurationSeconds, setImportDurationSeconds] = useState<number>(0);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Playlist Form State
+  const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
+  const [playlistTitle, setPlaylistTitle] = useState('');
+  const [playlistDesc, setPlaylistDesc] = useState('');
+  const [playlistThumbnail, setPlaylistThumbnail] = useState('');
+  const [playlistSelectedVideos, setPlaylistSelectedVideos] = useState<string[]>([]);
+  const [playlistStatus, setPlaylistStatus] = useState<'published' | 'unpublished' | 'draft'>('published');
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Reload core data
+  const refreshData = useCallback(async () => {
+    try {
+      setLoadingData(true);
+      const [vList, pList, siteSettings, sList] = await Promise.all([
+        getVideos(true),
+        getPlaylists(true),
+        getSiteSettings(),
+        getSections(true),
+      ]);
+      // If Firestore is still unpopulated, seed it directly
+      if (isAdmin && vList.length === 0) {
+        await seedInitialDataToFirestore();
+        const [seededVids, seededPlaylists, seededSections] = await Promise.all([
+          getVideos(true),
+          getPlaylists(true),
+          getSections(true),
+        ]);
+        setVideos(seededVids);
+        setPlaylists(seededPlaylists);
+        setSections(seededSections);
+      } else {
+        setVideos(vList);
+        setPlaylists(pList);
+        setSections(sList);
+      }
+      setSettings(siteSettings);
+    } catch (err) {
+      console.error('Error loading admin data:', err);
+      showToast('Failed to load admin records from database.', 'error');
+    } finally {
+      setLoadingData(false);
+    }
+  }, [isAdmin]);
+
+  const handleManualSeed = async () => {
+    try {
+      showToast('Syncing sample catalog to Firestore database...', 'success');
+      const res = await seedInitialDataToFirestore();
+      if (res.success) {
+        await refreshData();
+        showToast(`Successfully seeded ${res.count} initial videos & playlists to Firestore!`, 'success');
+      } else {
+        showToast(`Seeding failed: ${res.error || 'Permission error'}`, 'error');
+      }
+    } catch (e) {
+      showToast('Failed to write seed data to database', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const timer = setTimeout(() => {
+      refreshData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isAdmin, refreshData]);
+
+  // Admin login handler
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoginError(null);
+    setAdminLoggingIn(true);
+    try {
+      await loginWithEmail(adminEmail, adminPassword);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAdminLoginError(msg.includes('auth/invalid-credential') ? 'Invalid admin credentials' : 'Login failed');
+    } finally {
+      setAdminLoggingIn(false);
+    }
+  };
+
+  // Calculate Dashboard Metrics
+  const metrics = useMemo(() => {
+    const totalVideos = videos.length;
+    const published = videos.filter((v) => v.status === 'published').length;
+    const drafts = videos.filter((v) => v.status === 'draft').length;
+    const totalPlaylists = playlists.length;
+    const totalViews = videos.reduce((acc, curr) => acc + (curr.views || 0), 0);
+    return { totalVideos, published, drafts, totalPlaylists, totalViews };
+  }, [videos, playlists]);
+
+  // Filtered library videos
+  const filteredVideos = useMemo(() => {
+    return videos.filter((v) => {
+      const matchSearch =
+        !librarySearch.trim() ||
+        v.title.toLowerCase().includes(librarySearch.toLowerCase()) ||
+        v.description?.toLowerCase().includes(librarySearch.toLowerCase());
+      const matchStatus = statusFilter === 'all' || v.status === statusFilter;
+      const matchVisibility = visibilityFilter === 'all' || v.visibility === visibilityFilter;
+      const matchPlaylist = playlistFilter === 'all' || v.playlistId === playlistFilter;
+      const matchSection =
+        sectionFilter === 'all' ||
+        (v.sectionIds || []).includes(sectionFilter) ||
+        (v.sectionIds || []).some((secId) => {
+          const s = sections.find((sec) => sec.id === secId || sec.slug === secId);
+          return s?.id === sectionFilter || s?.slug === sectionFilter;
+        });
+      return matchSearch && matchStatus && matchVisibility && matchPlaylist && matchSection;
+    });
+  }, [videos, librarySearch, statusFilter, visibilityFilter, playlistFilter, sectionFilter, sections]);
+
+  const paginatedVideos = useMemo(() => {
+    const start = (libraryPage - 1) * itemsPerPage;
+    return filteredVideos.slice(start, start + itemsPerPage);
+  }, [filteredVideos, libraryPage]);
+
+  const totalPages = Math.ceil(filteredVideos.length / itemsPerPage) || 1;
+
+  // Handle Video Upload (Simulation with real data URL / local Blob URL and storage metadata)
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadTitle.trim()) {
+      showToast('Video title is required.', 'error');
+      return;
+    }
+    if (!uploadVideoFile && !uploadThumbnail) {
+      showToast('Please select a video file to upload.', 'error');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(10);
+    setUploadCancelled(false);
+
+    try {
+      // Simulate file upload progress
+      for (let p = 20; p <= 90; p += 20) {
+        if (uploadCancelled) throw new Error('Upload cancelled');
+        await new Promise((res) => setTimeout(res, 250));
+        setUploadProgress(p);
+      }
+
+      // Generate object URL for playback
+      const videoObjectUrl = uploadVideoFile
+        ? URL.createObjectURL(uploadVideoFile)
+        : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+
+      const thumbUrl =
+        uploadThumbnail ||
+        'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800&auto=format&fit=crop&q=80';
+
+      const tagArray = uploadTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      // Determine real detected duration
+      let finalDuration = uploadDurationSeconds;
+      if (!finalDuration && uploadVideoFile) {
+        try {
+          finalDuration = await detectDurationFromFile(uploadVideoFile);
+        } catch {
+          finalDuration = 300;
+        }
+      }
+      finalDuration = finalDuration || 300;
+
+      const created = await createVideo({
+        title: uploadTitle,
+        description: uploadDesc,
+        thumbnailUrl: thumbUrl,
+        videoUrl: videoObjectUrl,
+        sourceType: 'upload',
+        duration: finalDuration,
+        duration_seconds: finalDuration,
+        visibility: uploadVisibility,
+        status: uploadStatus,
+        sectionIds: uploadSectionIds,
+        ...(uploadPlaylistId.trim() ? { playlistId: uploadPlaylistId.trim() } : {}),
+        tags: tagArray,
+        category: uploadCategory,
+        uploadedBy: user?.displayName || user?.email || 'Admin',
+      });
+
+      // Synchronize video_sections junction table
+      if (uploadSectionIds.length > 0) {
+        try {
+          await assignVideoSections(created.id, uploadSectionIds);
+        } catch (secErr) {
+          console.error('Error assigning video sections:', secErr);
+        }
+      }
+
+      setUploadProgress(100);
+      showToast(`Video "${created.title}" uploaded successfully! Real duration: ${formatDuration(finalDuration)}`);
+      // Reset form
+      setUploadTitle('');
+      setUploadDesc('');
+      setUploadThumbnail('');
+      setUploadVideoFile(null);
+      setUploadTags('');
+      setUploadSectionIds([]);
+      setUploadDurationSeconds(0);
+      refreshData();
+      setActiveTab('library');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg !== 'Upload cancelled') {
+        showToast('Upload failed. Please check file format and connection.', 'error');
+      }
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Handle Video URL Import
+  const handleImportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim()) {
+      showToast('Video URL is required.', 'error');
+      return;
+    }
+    if (!importTitle.trim()) {
+      showToast('Video title is required.', 'error');
+      return;
+    }
+
+    // Basic URL validation
+    try {
+      new URL(importUrl);
+    } catch {
+      showToast('Please provide a valid HTTP or HTTPS video URL.', 'error');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const isHls = importUrl.endsWith('.m3u8') || importUrl.includes('.m3u8?');
+      const tagArray = importTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      // Determine real detected duration
+      let finalDuration = importDurationSeconds;
+      if (!finalDuration) {
+        try {
+          finalDuration = await detectDurationFromUrl(importUrl);
+        } catch {
+          finalDuration = 300;
+        }
+      }
+      finalDuration = finalDuration || 300;
+
+      const created = await createVideo({
+        title: importTitle,
+        description: importDesc,
+        thumbnailUrl:
+          importThumbnail ||
+          'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=800&auto=format&fit=crop&q=80',
+        videoUrl: importUrl,
+        sourceType: isHls ? 'hls' : 'direct',
+        duration: finalDuration,
+        duration_seconds: finalDuration,
+        visibility: importVisibility,
+        status: importStatus,
+        sectionIds: importSectionIds,
+        ...(importPlaylistId.trim() ? { playlistId: importPlaylistId.trim() } : {}),
+        tags: tagArray,
+        category: importCategory,
+        uploadedBy: user?.displayName || user?.email || 'Admin',
+      });
+
+      // Synchronize video_sections junction table
+      if (importSectionIds.length > 0) {
+        try {
+          await assignVideoSections(created.id, importSectionIds);
+        } catch (secErr) {
+          console.error('Error assigning video sections:', secErr);
+        }
+      }
+
+      showToast(`Imported video "${created.title}" successfully! Real duration: ${formatDuration(finalDuration)}`);
+      setImportUrl('');
+      setImportTitle('');
+      setImportDesc('');
+      setImportThumbnail('');
+      setImportSectionIds([]);
+      setImportDurationSeconds(0);
+      refreshData();
+      setActiveTab('library');
+    } catch (err) {
+      console.error('Import error:', err);
+      showToast('Failed to import video. Please verify permissions and URL.', 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Video Actions in Library
+  const handleTogglePublish = async (video: Video) => {
+    const nextStatus: VideoStatus = video.status === 'published' ? 'unpublished' : 'published';
+    try {
+      await updateVideo(video.id, { status: nextStatus });
+      showToast(`Video marked as ${nextStatus}`);
+      refreshData();
+    } catch (err) {
+      showToast('Failed to update status', 'error');
+    }
+  };
+
+  const handleDuplicateVideo = async (video: Video) => {
+    try {
+      await createVideo({
+        title: `${video.title} (Copy)`,
+        description: video.description,
+        thumbnailUrl: video.thumbnailUrl,
+        videoUrl: video.videoUrl,
+        sourceType: video.sourceType,
+        duration: video.duration,
+        duration_seconds: video.duration_seconds || video.duration,
+        sectionIds: video.sectionIds || [],
+        visibility: 'private',
+        status: 'draft',
+        ...(video.playlistId ? { playlistId: video.playlistId } : {}),
+        ...(video.tags ? { tags: video.tags } : {}),
+        ...(video.category ? { category: video.category } : {}),
+        uploadedBy: user?.displayName || 'Admin',
+      });
+      showToast('Video metadata duplicated as draft');
+      refreshData();
+    } catch (err) {
+      showToast('Failed to duplicate video', 'error');
+    }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!deletingVideo) return;
+    try {
+      await deleteVideo(deletingVideo.id);
+      showToast(`Deleted "${deletingVideo.title}"`);
+      setDeletingVideo(null);
+      refreshData();
+    } catch (err) {
+      showToast('Failed to delete video', 'error');
+    }
+  };
+
+  const handleSaveVideoEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVideo) return;
+    try {
+      const durSec = Number(editingVideo.duration_seconds || editingVideo.duration || 300);
+      await updateVideo(editingVideo.id, {
+        title: editingVideo.title,
+        description: editingVideo.description,
+        thumbnailUrl: editingVideo.thumbnailUrl,
+        videoUrl: editingVideo.videoUrl,
+        playlistId: editingVideo.playlistId?.trim() || '',
+        tags: editingVideo.tags || [],
+        category: editingVideo.category || '',
+        visibility: editingVideo.visibility,
+        status: editingVideo.status,
+        duration: durSec,
+        duration_seconds: durSec,
+        sectionIds: editingVideo.sectionIds || [],
+      });
+
+      // Synchronize video_sections junction table
+      if (editingVideo.sectionIds) {
+        await assignVideoSections(editingVideo.id, editingVideo.sectionIds);
+      }
+
+      showToast('Video details and section assignments updated successfully');
+      setEditingVideo(null);
+      refreshData();
+    } catch (err) {
+      showToast('Failed to update video', 'error');
+    }
+  };
+
+  // Playlist Management
+  const handleSavePlaylist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!playlistTitle.trim()) {
+      showToast('Playlist title is required', 'error');
+      return;
+    }
+
+    try {
+      if (editingPlaylist) {
+        await updatePlaylist(editingPlaylist.id, {
+          title: playlistTitle,
+          description: playlistDesc,
+          thumbnailUrl: playlistThumbnail,
+          videoIds: playlistSelectedVideos,
+          status: playlistStatus,
+        });
+        showToast('Playlist updated');
+      } else {
+        await createPlaylist({
+          title: playlistTitle,
+          description: playlistDesc,
+          thumbnailUrl:
+            playlistThumbnail ||
+            'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
+          videoIds: playlistSelectedVideos,
+          status: playlistStatus,
+          createdBy: user?.displayName || 'Admin',
+        });
+        showToast('Playlist created');
+      }
+      setIsCreatingPlaylist(false);
+      setEditingPlaylist(null);
+      refreshData();
+    } catch (err) {
+      showToast('Failed to save playlist', 'error');
+    }
+  };
+
+  const handleDeletePlaylist = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this playlist?')) return;
+    try {
+      await deletePlaylist(id);
+      showToast('Playlist deleted');
+      refreshData();
+    } catch (err) {
+      showToast('Failed to delete playlist', 'error');
+    }
+  };
+
+  const handleMovePlaylistVideo = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= playlistSelectedVideos.length) return;
+    const reordered = [...playlistSelectedVideos];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    setPlaylistSelectedVideos(reordered);
+  };
+
+  // Settings Save
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settings) return;
+    try {
+      await updateSiteSettings(settings);
+      showToast('Site settings updated successfully');
+    } catch (err) {
+      showToast('Failed to save settings', 'error');
+    }
+  };
+
+  // If user is not authenticated or not an admin
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-red-500 border-t-transparent" />
+          <span className="text-xs text-zinc-400">Verifying administrator credentials...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Not signed in -> Show Secure Admin Authentication Form
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center items-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-2xl">
+          <div className="flex justify-center mb-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-600/10 border border-red-500/20 text-red-500">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+          </div>
+          <h1 className="text-center text-xl font-bold tracking-tight text-white">Admin Control Portal</h1>
+          <p className="text-center text-xs text-zinc-400 mt-1 mb-6">
+            Authorized administrator access only. Sign in with your administrative account.
+          </p>
+
+          {adminLoginError && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{adminLoginError}</span>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => loginWithGoogle()}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 py-2.5 px-4 text-xs font-semibold text-white hover:bg-zinc-700 transition mb-4"
+          >
+            <span>Sign In with Admin Google Account</span>
+          </button>
+
+          <div className="relative my-4 text-center">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-zinc-800" />
+            </div>
+            <span className="relative bg-zinc-900 px-2 text-[10px] uppercase text-zinc-500">Or with Email</span>
+          </div>
+
+          <form onSubmit={handleAdminLogin} className="space-y-3.5">
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Admin Email</label>
+              <input
+                type="email"
+                required
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="admin@stream.com"
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-sm text-zinc-200 focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-sm text-zinc-200 focus:border-red-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={adminLoggingIn}
+              className="w-full rounded-xl bg-red-600 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition disabled:opacity-50"
+            >
+              {adminLoggingIn ? 'Verifying...' : 'Authenticate as Admin'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+              &larr; Return to Public Website
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Signed in, but NOT an admin:
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center items-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-zinc-900 p-8 text-center shadow-2xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 text-red-500 mb-4">
+            <ShieldAlert className="h-7 w-7" />
+          </div>
+          <h2 className="text-lg font-bold text-white">Access Denied</h2>
+          <p className="mt-2 text-xs text-zinc-400">
+            You are signed in as <strong className="text-zinc-200">{user.email}</strong>, but this account does not possess administrator privileges.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={async () => {
+                const ok = await claimAdminAccess();
+                if (ok) {
+                  showToast('Admin privilege claimed successfully!');
+                  window.location.reload();
+                } else {
+                  showToast('Failed to claim admin privilege.', 'error');
+                }
+              }}
+              className="rounded-xl bg-red-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition"
+            >
+              Authorize as Primary Admin
+            </button>
+            <Link
+              href="/"
+              className="rounded-xl border border-zinc-800 bg-zinc-800/80 px-4 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-700"
+            >
+              Back to Homepage
+            </Link>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="text-xs text-zinc-500 hover:text-zinc-300 mt-2"
+            >
+              Sign out and switch account
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          className={`fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-3 ${
+            toastMessage.type === 'success'
+              ? 'border border-emerald-500/30 bg-emerald-950/90 text-emerald-200'
+              : 'border border-red-500/30 bg-red-950/90 text-red-200'
+          }`}
+        >
+          {toastMessage.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
+      {/* Admin Sidebar */}
+      <aside className="w-64 border-r border-zinc-800/80 bg-zinc-900/60 p-4 flex flex-col shrink-0 hidden md:flex">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 px-2 py-3 mb-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white shadow-md shadow-red-600/30">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold tracking-tight text-white">Admin Portal</h2>
+            <p className="text-[10px] text-zinc-400">Content Management</p>
+          </div>
+        </div>
+
+        {/* Navigation items */}
+        <nav className="space-y-1 flex-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            <span>Dashboard</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('sections')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'sections' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Layers className="h-4 w-4 text-amber-400" />
+            <div className="flex items-center justify-between flex-1">
+              <span>Dynamic Sections</span>
+              <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.2 rounded-full">
+                {sections.length}
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('branding')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'branding' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Palette className="h-4 w-4 text-purple-400" />
+            <span>Branding & Colors</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('monetization')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'monetization' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Megaphone className="h-4 w-4 text-emerald-400" />
+            <div className="flex items-center justify-between flex-1">
+              <span>Monetization & Ads</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.2 rounded-full">
+                Adsterra
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('library')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'library' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Film className="h-4 w-4" />
+            <span>Video Library</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('upload')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'upload' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Upload className="h-4 w-4" />
+            <span>Upload Video</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('import')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'import' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Link2 className="h-4 w-4" />
+            <span>Import Video</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('playlists')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'playlists' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <ListVideo className="h-4 w-4" />
+            <span>Playlists</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('users')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'users' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>Users</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'settings' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <SettingsIcon className="h-4 w-4" />
+            <span>Settings</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('profile')}
+            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              activeTab === 'profile' ? 'bg-red-600 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <UserCheck className="h-4 w-4" />
+            <span>Admin Profile</span>
+          </button>
+        </nav>
+
+        {/* Footer info & Logout */}
+        <div className="border-t border-zinc-800/80 pt-4 space-y-2">
+          <Link
+            href="/"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white transition"
+          >
+            <span>Live Site</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              router.push('/');
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Log Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Header Bar */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="border-b border-zinc-800 bg-zinc-900/40 p-4 flex items-center justify-between md:hidden">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-red-500" />
+            <span className="text-sm font-bold">Admin Portal</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+              Live Site
+            </Link>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="rounded bg-red-600/20 px-2 py-1 text-xs text-red-400"
+            >
+              Exit
+            </button>
+          </div>
+        </header>
+
+        {/* Mobile Horizontal Tabs */}
+        <div className="flex overflow-x-auto border-b border-zinc-800 bg-zinc-900/60 p-2 gap-1 md:hidden scrollbar-none">
+          {(['dashboard', 'sections', 'branding', 'monetization', 'library', 'upload', 'import', 'playlists', 'users', 'settings', 'profile'] as AdminTab[]).map(
+            (tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap capitalize ${
+                  activeTab === tab ? 'bg-red-600 text-white' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                {tab}
+              </button>
+            )
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          {/* TAB 1: DASHBOARD */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Administrator Dashboard</h1>
+                <p className="text-xs text-zinc-400 mt-1">Platform metrics, video health, and streaming statistics.</p>
+              </div>
+
+              {/* Metric Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <span className="text-[11px] font-semibold text-zinc-400 uppercase">Total Videos</span>
+                  <p className="text-2xl font-bold text-white mt-1">{metrics.totalVideos}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <span className="text-[11px] font-semibold text-emerald-400 uppercase">Published</span>
+                  <p className="text-2xl font-bold text-white mt-1">{metrics.published}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <span className="text-[11px] font-semibold text-amber-400 uppercase">Drafts</span>
+                  <p className="text-2xl font-bold text-white mt-1">{metrics.drafts}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <span className="text-[11px] font-semibold text-indigo-400 uppercase">Playlists</span>
+                  <p className="text-2xl font-bold text-white mt-1">{metrics.totalPlaylists}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 col-span-2 lg:col-span-1">
+                  <span className="text-[11px] font-semibold text-red-400 uppercase">Total Views</span>
+                  <p className="text-2xl font-bold text-white mt-1">{formatViews(metrics.totalViews)}</p>
+                </div>
+              </div>
+
+              {/* Quick Actions Bar */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('upload')}
+                  className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-500 shadow-md shadow-red-600/20"
+                >
+                  <Upload className="h-4 w-4" />
+                  <span>Upload New Video</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('import')}
+                  className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700"
+                >
+                  <Link2 className="h-4 w-4" />
+                  <span>Import from Video URL</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingPlaylist(true);
+                    setEditingPlaylist(null);
+                    setPlaylistTitle('');
+                    setPlaylistDesc('');
+                    setPlaylistSelectedVideos([]);
+                    setActiveTab('playlists');
+                  }}
+                  className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Create Playlist</span>
+                </button>
+              </div>
+
+              {/* Recent Uploads Table */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-white">Recent Uploads</h3>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('library')}
+                    className="text-xs text-red-400 hover:text-red-300 font-semibold"
+                  >
+                    View all in library &rarr;
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800 text-zinc-400">
+                        <th className="pb-2 font-medium">Video</th>
+                        <th className="pb-2 font-medium">Format</th>
+                        <th className="pb-2 font-medium">Status</th>
+                        <th className="pb-2 font-medium">Visibility</th>
+                        <th className="pb-2 font-medium">Views</th>
+                        <th className="pb-2 font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/60">
+                      {videos.slice(0, 5).map((v) => (
+                        <tr key={v.id} className="hover:bg-zinc-800/30">
+                          <td className="py-2.5 pr-3">
+                            <div className="flex items-center gap-3">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={v.thumbnailUrl}
+                                alt={v.title}
+                                className="h-9 w-16 rounded object-cover bg-zinc-950 shrink-0"
+                              />
+                              <span className="font-semibold text-zinc-200 line-clamp-1 max-w-[200px]">{v.title}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 text-zinc-400 uppercase font-mono text-[10px]">{v.sourceType}</td>
+                          <td className="py-2.5">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                v.status === 'published'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}
+                            >
+                              {v.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 capitalize text-zinc-400">{v.visibility}</td>
+                          <td className="py-2.5 text-zinc-300">{formatViews(v.views)}</td>
+                          <td className="py-2.5 text-zinc-500">{formatTimeAgo(v.createdAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: DYNAMIC SECTIONS MANAGER */}
+          {activeTab === 'sections' && (
+            <AdminSectionManager
+              videos={videos}
+              onRefreshNeeded={refreshData}
+              showToast={showToast}
+            />
+          )}
+
+          {/* TAB: BRANDING & THEME CUSTOMIZATION */}
+          {activeTab === 'branding' && (
+            <AdminBrandingManager showToast={showToast} />
+          )}
+
+          {/* TAB: MONETIZATION & ADSTERRA ADS */}
+          {activeTab === 'monetization' && (
+            <AdminAdManager />
+          )}
+
+          {/* TAB 2: VIDEO LIBRARY */}
+          {activeTab === 'library' && (
+            <div className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight text-white">Video Library</h1>
+                  <p className="text-xs text-zinc-400 mt-0.5">Manage, edit, publish, preview, and organize all platform videos.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('upload')}
+                    className="flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-red-500"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Upload Video</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters Bar */}
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={librarySearch}
+                    onChange={(e) => {
+                      setLibrarySearch(e.target.value);
+                      setLibraryPage(1);
+                    }}
+                    placeholder="Search videos by title..."
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-1.5 pl-9 pr-3 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value as any);
+                    setLibraryPage(1);
+                  }}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                  <option value="unpublished">Unpublished</option>
+                </select>
+
+                <select
+                  value={visibilityFilter}
+                  onChange={(e) => {
+                    setVisibilityFilter(e.target.value as any);
+                    setLibraryPage(1);
+                  }}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                >
+                  <option value="all">All Visibility</option>
+                  <option value="public">Public</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="private">Private</option>
+                </select>
+
+                <select
+                  value={playlistFilter}
+                  onChange={(e) => {
+                    setPlaylistFilter(e.target.value);
+                    setLibraryPage(1);
+                  }}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                >
+                  <option value="all">All Playlists</option>
+                  {playlists.map((pl) => (
+                    <option key={pl.id} value={pl.id}>
+                      {pl.title}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={sectionFilter}
+                  onChange={(e) => {
+                    setSectionFilter(e.target.value);
+                    setLibraryPage(1);
+                  }}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                >
+                  <option value="all">All Sections ({sections.length})</option>
+                  {sections.map((sec) => (
+                    <option key={sec.id} value={sec.id}>
+                      {sec.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Table */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-950/60 text-zinc-400">
+                        <th className="p-3 font-medium">Video</th>
+                        <th className="p-3 font-medium">Sections</th>
+                        <th className="p-3 font-medium">Status</th>
+                        <th className="p-3 font-medium">Visibility</th>
+                        <th className="p-3 font-medium">Playlist</th>
+                        <th className="p-3 font-medium">Views</th>
+                        <th className="p-3 font-medium">Uploaded</th>
+                        <th className="p-3 text-right font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      {paginatedVideos.map((v) => {
+                        const pl = playlists.find((p) => p.id === v.playlistId);
+                        const assignedSections = (v.sectionIds || []).map((secId) =>
+                          sections.find((s) => s.id === secId || s.slug === secId)
+                        ).filter(Boolean) as Section[];
+
+                        return (
+                          <tr key={v.id} className="hover:bg-zinc-800/30 transition">
+                            <td className="p-3">
+                              <div className="flex items-center gap-3">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={v.thumbnailUrl}
+                                  alt={v.title}
+                                  className="h-10 w-16 rounded object-cover bg-zinc-950 shrink-0"
+                                />
+                                <div>
+                                  <h4 className="font-semibold text-zinc-200 line-clamp-1 max-w-[220px]">{v.title}</h4>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 mt-0.5">
+                                    <span className="font-mono text-amber-400 font-semibold flex items-center gap-0.5">
+                                      <Clock className="h-2.5 w-2.5 inline" />
+                                      {formatDuration(v.duration_seconds || v.duration)}
+                                    </span>
+                                    <span>&bull;</span>
+                                    <span className="uppercase text-zinc-500">{v.sourceType}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              {assignedSections.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 max-w-[180px]">
+                                  {assignedSections.map((sec) => (
+                                    <span
+                                      key={sec.id}
+                                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                                      style={{
+                                        backgroundColor: `${sec.color || '#E50914'}22`,
+                                        color: sec.color || '#E50914',
+                                        border: `1px solid ${sec.color || '#E50914'}40`,
+                                      }}
+                                    >
+                                      <SectionIcon name={sec.icon} className="h-2.5 w-2.5" />
+                                      <span className="truncate max-w-[90px]">{sec.name}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-zinc-600 italic">No section</span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePublish(v)}
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase transition ${
+                                  v.status === 'published'
+                                    ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                                }`}
+                              >
+                                {v.status}
+                              </button>
+                            </td>
+                            <td className="p-3 capitalize text-zinc-400">{v.visibility}</td>
+                            <td className="p-3 text-zinc-400 line-clamp-1">{pl ? pl.title : '—'}</td>
+                            <td className="p-3 text-zinc-300">{formatViews(v.views)}</td>
+                            <td className="p-3 text-zinc-500">{formatTimeAgo(v.createdAt)}</td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewVideo(v)}
+                                  title="Preview video"
+                                  className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingVideo(v)}
+                                  title="Edit metadata"
+                                  className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDuplicateVideo(v)}
+                                  title="Duplicate metadata"
+                                  className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingVideo(v)}
+                                  title="Delete video"
+                                  className="rounded p-1.5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                <div className="flex items-center justify-between border-t border-zinc-800 p-3 text-xs text-zinc-400">
+                  <span>
+                    Showing {paginatedVideos.length} of {filteredVideos.length} videos
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={libraryPage === 1}
+                      onClick={() => setLibraryPage((p) => Math.max(1, p - 1))}
+                      className="rounded p-1 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span>
+                      Page {libraryPage} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={libraryPage >= totalPages}
+                      onClick={() => setLibraryPage((p) => Math.min(totalPages, p + 1))}
+                      className="rounded p-1 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: UPLOAD VIDEO */}
+          {activeTab === 'upload' && (
+            <div className="max-w-3xl space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white">Upload New Video</h1>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Direct administrative upload workflow with progress telemetry and metadata storage.
+                </p>
+              </div>
+
+              <form onSubmit={handleUploadSubmit} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6">
+                {/* File selector & drag-drop */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Video File (MP4, WebM, MOV)</label>
+                  <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-800 bg-zinc-950/60 p-6 text-center hover:border-zinc-700 transition">
+                    <Upload className="h-8 w-8 text-zinc-500 mb-2" />
+                    {uploadVideoFile ? (
+                      <div className="text-xs">
+                        <p className="font-semibold text-white">{uploadVideoFile.name}</p>
+                        <p className="text-zinc-500 mt-0.5">{(uploadVideoFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-xs text-zinc-300 font-medium">Drag and drop video file here, or click to browse</p>
+                        <p className="text-[10px] text-zinc-500 mt-1">Supports MP4, WebM, MKV up to 500MB</p>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setUploadVideoFile(file);
+                          if (!uploadTitle) {
+                            setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+                          }
+                          // Automatically detect real video duration
+                          setIsDetectingDuration(true);
+                          try {
+                            const dur = await detectDurationFromFile(file);
+                            setUploadDurationSeconds(dur);
+                            showToast(`Duration detected: ${formatDuration(dur)} (${Math.round(dur)}s)`);
+                          } catch (err) {
+                            console.warn('Could not extract duration automatically:', err);
+                          } finally {
+                            setIsDetectingDuration(false);
+                          }
+                        }
+                      }}
+                      className="mt-3 text-xs text-zinc-400 file:mr-2 file:rounded file:border-0 file:bg-zinc-800 file:px-2.5 file:py-1 file:text-xs file:font-semibold file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Duration Detection Status */}
+                {isDetectingDuration && (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                    <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                    <span>Reading video stream metadata to calculate real duration...</span>
+                  </div>
+                )}
+
+                {uploadDurationSeconds > 0 && !isDetectingDuration && (
+                  <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-emerald-400" />
+                      <div>
+                        <span className="font-bold">Real Duration Detected: </span>
+                        <span className="font-mono text-emerald-200">{formatDuration(uploadDurationSeconds)}</span>
+                        <span className="text-zinc-400 text-[10px] ml-1.5">({Math.round(uploadDurationSeconds)} seconds total)</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 border border-emerald-500/40 rounded px-1.5 py-0.5">
+                      Verified
+                    </span>
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {isUploading && (
+                  <div className="rounded-lg bg-zinc-950 p-3 border border-zinc-800">
+                    <div className="flex justify-between text-xs mb-1 text-zinc-300">
+                      <span>Uploading video...</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                      <div className="h-full bg-red-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUploadCancelled(true)}
+                      className="mt-2 text-xs text-red-400 hover:text-red-300"
+                    >
+                      Cancel Upload
+                    </button>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Video Title *</label>
+                  <input
+                    type="text"
+                    required
+                    value={uploadTitle}
+                    onChange={(e) => setUploadTitle(e.target.value)}
+                    placeholder="E.g., High Dynamic Range Nature Showcase"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Description</label>
+                  <textarea
+                    rows={3}
+                    value={uploadDesc}
+                    onChange={(e) => setUploadDesc(e.target.value)}
+                    placeholder="Provide detailed description or synopsis..."
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Thumbnail Image URL</label>
+                    <input
+                      type="url"
+                      value={uploadThumbnail}
+                      onChange={(e) => setUploadThumbnail(e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Assign to Playlist</label>
+                    <select
+                      value={uploadPlaylistId}
+                      onChange={(e) => setUploadPlaylistId(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="">None (Standalone)</option>
+                      {playlists.map((pl) => (
+                        <option key={pl.id} value={pl.id}>
+                          {pl.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Dynamic Section Assignment */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-zinc-300">
+                      Assign to Dynamic Sections (Carousels)
+                    </label>
+                    <span className="text-[10px] text-zinc-500">Video will appear in rows matching these sections</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                    {sections.map((sec) => {
+                      const isChecked = uploadSectionIds.includes(sec.id);
+                      return (
+                        <label
+                          key={sec.id}
+                          className={`flex items-center gap-2 rounded-lg border p-2 text-xs cursor-pointer transition select-none ${
+                            isChecked
+                              ? 'border-amber-500/50 bg-amber-500/10 text-white font-semibold'
+                              : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setUploadSectionIds([...uploadSectionIds, sec.id]);
+                              } else {
+                                setUploadSectionIds(uploadSectionIds.filter((id) => id !== sec.id));
+                              }
+                            }}
+                            className="rounded border-zinc-700 text-red-600 focus:ring-0"
+                          />
+                          <SectionIcon name={sec.icon} className="h-3.5 w-3.5" />
+                          <span className="truncate">{sec.name}</span>
+                        </label>
+                      );
+                    })}
+                    {sections.length === 0 && (
+                      <p className="col-span-full text-[11px] text-zinc-500 italic">No sections created yet. Head to Dynamic Sections tab to add sections.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Visibility</label>
+                    <select
+                      value={uploadVisibility}
+                      onChange={(e) => setUploadVisibility(e.target.value as VideoVisibility)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="public">Public</option>
+                      <option value="unlisted">Unlisted</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Status</label>
+                    <select
+                      value={uploadStatus}
+                      onChange={(e) => setUploadStatus(e.target.value as VideoStatus)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="published">Published</option>
+                      <option value="draft">Draft</option>
+                      <option value="unpublished">Unpublished</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Category</label>
+                    <input
+                      type="text"
+                      value={uploadCategory}
+                      onChange={(e) => setUploadCategory(e.target.value)}
+                      placeholder="Animation, Tech, Sci-Fi..."
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Tags (comma separated)</label>
+                    <input
+                      type="text"
+                      value={uploadTags}
+                      onChange={(e) => setUploadTags(e.target.value)}
+                      placeholder="4K, HDR, Blender"
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isUploading}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span>{isUploading ? 'Uploading Video...' : 'Publish & Save to Library'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 4: IMPORT VIDEO BY URL */}
+          {activeTab === 'import' && (
+            <div className="max-w-3xl space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white">Import Video by URL</h1>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Import direct MP4/WebM video sources or adaptive HLS (.m3u8) live streams with complete metadata.
+                </p>
+              </div>
+
+              <form onSubmit={handleImportSubmit} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-zinc-300">Direct Video URL or HLS Stream (.m3u8) *</label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!importUrl.trim()) {
+                          showToast('Enter a video URL first', 'error');
+                          return;
+                        }
+                        setIsDetectingDuration(true);
+                        try {
+                          const dur = await detectDurationFromUrl(importUrl.trim());
+                          setImportDurationSeconds(dur);
+                          showToast(`Detected duration: ${formatDuration(dur)} (${Math.round(dur)}s)`);
+                        } catch (e) {
+                          showToast('Could not extract duration automatically from this URL', 'error');
+                        } finally {
+                          setIsDetectingDuration(false);
+                        }
+                      }}
+                      className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
+                    >
+                      <Clock className="h-3 w-3" />
+                      <span>Detect Duration</span>
+                    </button>
+                  </div>
+                  <input
+                    type="url"
+                    required
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    onBlur={async () => {
+                      if (importUrl.trim() && importDurationSeconds === 0) {
+                        try {
+                          setIsDetectingDuration(true);
+                          const dur = await detectDurationFromUrl(importUrl.trim());
+                          setImportDurationSeconds(dur);
+                        } catch {
+                          // Silent on blur
+                        } finally {
+                          setIsDetectingDuration(false);
+                        }
+                      }
+                    }}
+                    placeholder="https://example.com/video.mp4 or https://stream.mux.dev/playlist.m3u8"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs font-mono text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    Direct compatible video endpoints only (MP4, WebM, or HLS .m3u8).
+                  </p>
+                </div>
+
+                {/* Duration Status */}
+                {isDetectingDuration && (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                    <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                    <span>Analyzing video URL stream headers to measure real duration...</span>
+                  </div>
+                )}
+
+                {importDurationSeconds > 0 && !isDetectingDuration && (
+                  <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-emerald-400" />
+                      <div>
+                        <span className="font-bold">Real Duration Detected: </span>
+                        <span className="font-mono text-emerald-200">{formatDuration(importDurationSeconds)}</span>
+                        <span className="text-zinc-400 text-[10px] ml-1.5">({Math.round(importDurationSeconds)} seconds total)</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 border border-emerald-500/40 rounded px-1.5 py-0.5">
+                      Verified
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Title *</label>
+                  <input
+                    type="text"
+                    required
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    placeholder="Video Title"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Description</label>
+                  <textarea
+                    rows={3}
+                    value={importDesc}
+                    onChange={(e) => setImportDesc(e.target.value)}
+                    placeholder="Brief description..."
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Thumbnail URL</label>
+                    <input
+                      type="url"
+                      value={importThumbnail}
+                      onChange={(e) => setImportThumbnail(e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Playlist</label>
+                    <select
+                      value={importPlaylistId}
+                      onChange={(e) => setImportPlaylistId(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="">None (Standalone)</option>
+                      {playlists.map((pl) => (
+                        <option key={pl.id} value={pl.id}>
+                          {pl.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Dynamic Section Assignment */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-zinc-300">
+                      Assign to Dynamic Sections (Carousels)
+                    </label>
+                    <span className="text-[10px] text-zinc-500">Video will appear in rows matching these sections</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                    {sections.map((sec) => {
+                      const isChecked = importSectionIds.includes(sec.id);
+                      return (
+                        <label
+                          key={sec.id}
+                          className={`flex items-center gap-2 rounded-lg border p-2 text-xs cursor-pointer transition select-none ${
+                            isChecked
+                              ? 'border-amber-500/50 bg-amber-500/10 text-white font-semibold'
+                              : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setImportSectionIds([...importSectionIds, sec.id]);
+                              } else {
+                                setImportSectionIds(importSectionIds.filter((id) => id !== sec.id));
+                              }
+                            }}
+                            className="rounded border-zinc-700 text-red-600 focus:ring-0"
+                          />
+                          <SectionIcon name={sec.icon} className="h-3.5 w-3.5" />
+                          <span className="truncate">{sec.name}</span>
+                        </label>
+                      );
+                    })}
+                    {sections.length === 0 && (
+                      <p className="col-span-full text-[11px] text-zinc-500 italic">No sections created yet. Head to Dynamic Sections tab to add sections.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Visibility</label>
+                    <select
+                      value={importVisibility}
+                      onChange={(e) => setImportVisibility(e.target.value as VideoVisibility)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="public">Public</option>
+                      <option value="unlisted">Unlisted</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Status</label>
+                    <select
+                      value={importStatus}
+                      onChange={(e) => setImportStatus(e.target.value as VideoStatus)}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                    >
+                      <option value="published">Published</option>
+                      <option value="draft">Draft</option>
+                      <option value="unpublished">Unpublished</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Category</label>
+                    <input
+                      type="text"
+                      value={importCategory}
+                      onChange={(e) => setImportCategory(e.target.value)}
+                      placeholder="Tech, Live..."
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isImporting}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition disabled:opacity-50"
+                  >
+                    <Link2 className="h-4 w-4" />
+                    <span>{isImporting ? 'Validating & Importing...' : 'Import Video'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 5: PLAYLIST SYSTEM */}
+          {activeTab === 'playlists' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight text-white">Playlists</h1>
+                  <p className="text-xs text-zinc-400 mt-0.5">Organize videos into sequential collections with custom ordering.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingPlaylist(true);
+                    setEditingPlaylist(null);
+                    setPlaylistTitle('');
+                    setPlaylistDesc('');
+                    setPlaylistThumbnail('');
+                    setPlaylistSelectedVideos([]);
+                    setPlaylistStatus('published');
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-red-500"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Create Playlist</span>
+                </button>
+              </div>
+
+              {/* Playlist Form Dialog / Block */}
+              {(isCreatingPlaylist || editingPlaylist) && (
+                <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                    <h3 className="text-sm font-bold text-white">
+                      {editingPlaylist ? `Edit Playlist: ${editingPlaylist.title}` : 'Create New Playlist'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCreatingPlaylist(false);
+                        setEditingPlaylist(null);
+                      }}
+                      className="text-zinc-400 hover:text-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSavePlaylist} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-1">Playlist Title *</label>
+                      <input
+                        type="text"
+                        required
+                        value={playlistTitle}
+                        onChange={(e) => setPlaylistTitle(e.target.value)}
+                        placeholder="E.g., Blender Open Animation Collection"
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-1">Description</label>
+                      <textarea
+                        rows={2}
+                        value={playlistDesc}
+                        onChange={(e) => setPlaylistDesc(e.target.value)}
+                        placeholder="Overview of this playlist..."
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-300 mb-1">Thumbnail URL</label>
+                        <input
+                          type="url"
+                          value={playlistThumbnail}
+                          onChange={(e) => setPlaylistThumbnail(e.target.value)}
+                          placeholder="https://..."
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-300 mb-1">Status</label>
+                        <select
+                          value={playlistStatus}
+                          onChange={(e) => setPlaylistStatus(e.target.value as any)}
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                        >
+                          <option value="published">Published</option>
+                          <option value="draft">Draft</option>
+                          <option value="unpublished">Unpublished</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Reorder and select videos */}
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                        Included Videos & Ordering ({playlistSelectedVideos.length} selected)
+                      </label>
+
+                      {/* Selected order list */}
+                      {playlistSelectedVideos.length > 0 && (
+                        <div className="mb-3 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                          {playlistSelectedVideos.map((vidId, idx) => {
+                            const v = videos.find((item) => item.id === vidId);
+                            return (
+                              <div
+                                key={vidId}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="w-5 text-center font-bold text-zinc-500">{idx + 1}</span>
+                                  <span className="font-semibold text-zinc-200 line-clamp-1">
+                                    {v ? v.title : vidId}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={idx === 0}
+                                    onClick={() => handleMovePlaylistVideo(idx, idx - 1)}
+                                    className="rounded p-1 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+                                  >
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={idx === playlistSelectedVideos.length - 1}
+                                    onClick={() => handleMovePlaylistVideo(idx, idx + 1)}
+                                    className="rounded p-1 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+                                  >
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPlaylistSelectedVideos(playlistSelectedVideos.filter((id) => id !== vidId))
+                                    }
+                                    className="rounded p-1 text-red-400 hover:bg-red-500/10"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Add more videos selector */}
+                      <div className="flex gap-2">
+                        <select
+                          id="add-video-to-playlist-select"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val && !playlistSelectedVideos.includes(val)) {
+                              setPlaylistSelectedVideos([...playlistSelectedVideos, val]);
+                            }
+                            e.target.value = '';
+                          }}
+                          className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                        >
+                          <option value="">+ Add video to playlist...</option>
+                          {videos
+                            .filter((v) => !playlistSelectedVideos.includes(v.id))
+                            .map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.title}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCreatingPlaylist(false);
+                          setEditingPlaylist(null);
+                        }}
+                        className="rounded-xl border border-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-400 hover:bg-zinc-800"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded-xl bg-red-600 px-5 py-2 text-xs font-bold text-white hover:bg-red-500"
+                      >
+                        Save Playlist
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Existing Playlists Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {playlists.map((pl) => (
+                  <div
+                    key={pl.id}
+                    className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="relative aspect-video w-full overflow-hidden bg-zinc-950">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={
+                            pl.thumbnailUrl ||
+                            'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80'
+                          }
+                          alt={pl.title}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute top-2 right-2 rounded bg-black/80 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+                          {pl.videoIds.length} {pl.videoIds.length === 1 ? 'Video' : 'Videos'}
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-bold text-white text-sm line-clamp-1">{pl.title}</h3>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
+                              pl.status === 'published' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                            }`}
+                          >
+                            {pl.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 line-clamp-2">{pl.description || 'No description'}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-4 pt-0 border-t border-zinc-800/60 flex items-center justify-between mt-2">
+                      <span className="text-[10px] text-zinc-500">{formatTimeAgo(pl.createdAt)}</span>
+                      <div className="flex items-center gap-1.5 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPlaylist(pl);
+                            setPlaylistTitle(pl.title);
+                            setPlaylistDesc(pl.description);
+                            setPlaylistThumbnail(pl.thumbnailUrl || '');
+                            setPlaylistSelectedVideos(pl.videoIds || []);
+                            setPlaylistStatus(pl.status);
+                            setIsCreatingPlaylist(false);
+                          }}
+                          className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePlaylist(pl.id)}
+                          className="rounded p-1.5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: USERS */}
+          {activeTab === 'users' && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white">Registered Users</h1>
+                <p className="text-xs text-zinc-400 mt-0.5">Platform accounts, identity verification, and role status.</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800 text-zinc-400">
+                        <th className="pb-2 font-medium">User</th>
+                        <th className="pb-2 font-medium">Email</th>
+                        <th className="pb-2 font-medium">Role</th>
+                        <th className="pb-2 font-medium">Permissions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      <tr className="hover:bg-zinc-800/20">
+                        <td className="py-3 font-semibold text-white">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-white font-bold text-[10px]">
+                              A
+                            </div>
+                            <span>Primary Administrator</span>
+                          </div>
+                        </td>
+                        <td className="py-3 text-zinc-300">titangaming4m@gmail.com</td>
+                        <td className="py-3">
+                          <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-bold text-red-400 border border-red-500/20">
+                            Super Admin
+                          </span>
+                        </td>
+                        <td className="py-3 text-zinc-400">Full Video & Site Control</td>
+                      </tr>
+
+                      {user && user.email !== 'titangaming4m@gmail.com' && (
+                        <tr className="hover:bg-zinc-800/20">
+                          <td className="py-3 font-semibold text-white">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 text-zinc-300 font-bold text-[10px]">
+                                {user.displayName?.[0] || 'U'}
+                              </div>
+                              <span>{user.displayName || 'Current User'}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-zinc-300">{user.email}</td>
+                          <td className="py-3">
+                            <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-400 border border-indigo-500/20">
+                              {isAdmin ? 'Admin' : 'Normal User'}
+                            </span>
+                          </td>
+                          <td className="py-3 text-zinc-400">
+                            {isAdmin ? 'Management Access' : 'Playback & Profiles only'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 7: SETTINGS */}
+          {activeTab === 'settings' && (
+            <div className="max-w-2xl space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white">Platform Settings</h1>
+                <p className="text-xs text-zinc-400 mt-0.5">Brand configuration, theme styling, and storage drivers.</p>
+              </div>
+
+              {settings && (
+                <form onSubmit={handleSaveSettings} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Platform Name</label>
+                    <input
+                      type="text"
+                      value={settings.siteName}
+                      onChange={(e) => setSettings({ ...settings, siteName: e.target.value })}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-1">Primary Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={settings.primaryColor || '#dc2626'}
+                          onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
+                          className="h-8 w-12 rounded cursor-pointer border border-zinc-800 bg-transparent"
+                        />
+                        <input
+                          type="text"
+                          value={settings.primaryColor || '#dc2626'}
+                          onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs font-mono text-zinc-300"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300 mb-1">Default Visibility</label>
+                      <select
+                        value={settings.defaultVisibility}
+                        onChange={(e) => setSettings({ ...settings, defaultVisibility: e.target.value as any })}
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-300 focus:border-red-500 focus:outline-none"
+                      >
+                        <option value="public">Public</option>
+                        <option value="unlisted">Unlisted</option>
+                        <option value="private">Private</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-300 mb-1">Default Fallback Thumbnail</label>
+                    <input
+                      type="url"
+                      value={settings.defaultThumbnail || ''}
+                      onChange={(e) => setSettings({ ...settings, defaultThumbnail: e.target.value })}
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-xs text-zinc-200 focus:border-red-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Storage driver status */}
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-1 text-xs">
+                    <span className="font-semibold text-zinc-300">Active Storage Configuration</span>
+                    <div className="flex items-center justify-between text-zinc-400">
+                      <span>Driver:</span>
+                      <span className="font-mono text-red-400 uppercase">{settings.storageConfig?.driver || 'local'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-zinc-400">
+                      <span>Status:</span>
+                      <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                        <CheckCircle2 className="h-3 w-3" /> Connected
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition"
+                    >
+                      <Save className="h-4 w-4" />
+                      <span>Save Configuration</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* TAB 8: ADMIN PROFILE */}
+          {activeTab === 'profile' && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white">Administrator Profile</h1>
+                <p className="text-xs text-zinc-400 mt-0.5">Current session identity and privileges.</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-600 text-white font-bold text-xl shadow-lg shadow-red-600/30">
+                    {user?.displayName?.[0] || 'A'}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white text-base">{user?.displayName || 'Administrator'}</h3>
+                    <p className="text-xs text-zinc-400">{user?.email}</p>
+                    <div className="mt-1 flex items-center gap-1.5 text-xs text-emerald-400">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Verified Administrator Access Active</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-800 pt-4 space-y-2 text-xs">
+                  <div className="flex justify-between text-zinc-400">
+                    <span>UID:</span>
+                    <span className="font-mono text-zinc-300">{user?.uid}</span>
+                  </div>
+                  <div className="flex justify-between text-zinc-400">
+                    <span>Account Type:</span>
+                    <span className="font-semibold text-red-400">Master Administrator</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout();
+                      router.push('/');
+                    }}
+                    className="rounded-xl bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 transition"
+                  >
+                    Sign Out of Admin Portal
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Video Preview Modal */}
+      {previewVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-2 border-b border-zinc-800">
+              <h3 className="font-bold text-white text-sm">{previewVideo.title}</h3>
+              <button
+                type="button"
+                onClick={() => setPreviewVideo(null)}
+                className="rounded p-1 text-zinc-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
+              <video
+                src={previewVideo.videoUrl}
+                controls
+                autoPlay
+                className="h-full w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Video Modal */}
+      {editingVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-zinc-800">
+              <h3 className="font-bold text-white text-sm">Edit Video Details</h3>
+              <button
+                type="button"
+                onClick={() => setEditingVideo(null)}
+                className="text-zinc-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveVideoEdit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
+                <input
+                  type="text"
+                  required
+                  value={editingVideo.title}
+                  onChange={(e) => setEditingVideo({ ...editingVideo, title: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Description</label>
+                <textarea
+                  rows={3}
+                  value={editingVideo.description}
+                  onChange={(e) => setEditingVideo({ ...editingVideo, description: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Status</label>
+                  <select
+                    value={editingVideo.status}
+                    onChange={(e) => setEditingVideo({ ...editingVideo, status: e.target.value as any })}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300"
+                  >
+                    <option value="published">Published</option>
+                    <option value="draft">Draft</option>
+                    <option value="unpublished">Unpublished</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Visibility</label>
+                  <select
+                    value={editingVideo.visibility}
+                    onChange={(e) => setEditingVideo({ ...editingVideo, visibility: e.target.value as any })}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300"
+                  >
+                    <option value="public">Public</option>
+                    <option value="unlisted">Unlisted</option>
+                    <option value="private">Private</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Playlist</label>
+                <select
+                  value={editingVideo.playlistId || ''}
+                  onChange={(e) => setEditingVideo({ ...editingVideo, playlistId: e.target.value || undefined })}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300"
+                >
+                  <option value="">None (Standalone)</option>
+                  {playlists.map((pl) => (
+                    <option key={pl.id} value={pl.id}>
+                      {pl.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Thumbnail URL</label>
+                <input
+                  type="url"
+                  value={editingVideo.thumbnailUrl}
+                  onChange={(e) => setEditingVideo({ ...editingVideo, thumbnailUrl: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Video Stream URL</label>
+                <input
+                  type="url"
+                  value={editingVideo.videoUrl}
+                  onChange={(e) => setEditingVideo({ ...editingVideo, videoUrl: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs font-mono text-white"
+                />
+              </div>
+
+              {/* Video Duration */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-zinc-400">Duration (seconds)</label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!editingVideo.videoUrl) return;
+                      showToast('Reading video stream metadata...');
+                      try {
+                        const dur = await detectDurationFromUrl(editingVideo.videoUrl);
+                        setEditingVideo({ ...editingVideo, duration_seconds: dur, duration: dur });
+                        showToast(`Detected: ${formatDuration(dur)} (${Math.round(dur)}s)`);
+                      } catch {
+                        showToast('Could not extract duration automatically', 'error');
+                      }
+                    }}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
+                  >
+                    <Clock className="h-3 w-3" />
+                    <span>Auto-detect duration</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    value={editingVideo.duration_seconds || editingVideo.duration || 0}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setEditingVideo({ ...editingVideo, duration_seconds: val, duration: val });
+                    }}
+                    className="w-32 rounded-xl border border-zinc-800 bg-zinc-950 p-2 text-xs font-mono text-white"
+                  />
+                  <div className="flex items-center gap-1 text-xs font-mono text-amber-400 font-semibold bg-amber-500/10 px-2.5 py-1.5 rounded-lg border border-amber-500/20">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Display: {formatDuration(editingVideo.duration_seconds || editingVideo.duration || 0)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dynamic Section Assignment */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  Assigned Dynamic Sections (Carousels)
+                </label>
+                <div className="grid grid-cols-2 gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-2.5 max-h-36 overflow-y-auto">
+                  {sections.map((sec) => {
+                    const currentSecIds = editingVideo.sectionIds || [];
+                    const isChecked = currentSecIds.includes(sec.id) || currentSecIds.includes(sec.slug);
+                    return (
+                      <label
+                        key={sec.id}
+                        className={`flex items-center gap-2 rounded-lg border p-1.5 text-xs cursor-pointer select-none ${
+                          isChecked
+                            ? 'border-amber-500/50 bg-amber-500/10 text-white font-semibold'
+                            : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            let updated: string[];
+                            if (e.target.checked) {
+                              updated = [...currentSecIds, sec.id];
+                            } else {
+                              updated = currentSecIds.filter((id) => id !== sec.id && id !== sec.slug);
+                            }
+                            setEditingVideo({ ...editingVideo, sectionIds: updated });
+                          }}
+                          className="rounded border-zinc-700 text-red-600 focus:ring-0"
+                        />
+                        <SectionIcon name={sec.icon} className="h-3.5 w-3.5" />
+                        <span className="truncate">{sec.name}</span>
+                      </label>
+                    );
+                  })}
+                  {sections.length === 0 && (
+                    <p className="col-span-full text-[10px] text-zinc-500 italic">No sections created.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingVideo(null)}
+                  className="rounded-xl border border-zinc-800 px-4 py-2 text-xs text-zinc-400 hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-red-600 px-5 py-2 text-xs font-bold text-white hover:bg-red-500"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-red-500/30 bg-zinc-900 p-6 shadow-2xl text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-500 mb-3">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <h3 className="text-base font-bold text-white">Delete Video</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Are you sure you want to permanently delete &ldquo;{deletingVideo.title}&rdquo;? This action cannot be undone.
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletingVideo(null)}
+                className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteConfirmed}
+                className="flex-1 rounded-xl bg-red-600 py-2 text-xs font-bold text-white hover:bg-red-500"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

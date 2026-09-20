@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        ((request.auth.token.email == 'titangaming4m@gmail.com' || request.auth.token.email == 'titangaming5m@gmail.com') && request.auth.token.email_verified == true)
+      );
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Admins collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Videos collection
+    match /videos/{videoId} {
+      allow get: if (resource == null) || (resource.data.visibility in ['public', 'unlisted'] && resource.data.status == 'published') || isAdmin();
+      allow list: if (resource.data.visibility == 'public' && resource.data.status == 'published') || isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['views', 'updatedAt']) &&
+        incoming().views == existing().views + 1
+      );
+    }
+
+    // Playlists collection
+    match /playlists/{playlistId} {
+      allow get: if (resource == null) || resource.data.status == 'published' || isAdmin();
+      allow list: if resource.data.status == 'published' || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Watch Progress collection
+    match /watch_progress/{progressId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && incoming().userId == request.auth.uid && existing().userId == request.auth.uid;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // Settings collection
+    match /settings/{settingId} {
+      allow get: if true;
+      allow list: if true;
+      allow write: if isAdmin();
+    }
+
+    // Sections collection
+    match /sections/{sectionId} {
+      allow get: if true;
+      allow list: if true;
+      allow write: if isAdmin();
+    }
+
+    // Video Sections junction collection
+    match /video_sections/{videoSectionId} {
+      allow get: if true;
+      allow list: if true;
+      allow write: if isAdmin();
+    }
+
+    // Advertisements collection
+    match /ads/{adId} {
+      allow get, list: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        incoming().diff(existing()).affectedKeys().hasAny(['impressions', 'clicks', 'updated_at']) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['impressions', 'clicks', 'updated_at'])
+      );
+    }
+
+    // Ad Settings collection
+    match /ad_settings/{settingId} {
+      allow get, list: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

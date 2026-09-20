@@ -1,0 +1,6 @@
+{
+  "name": "Video Streaming Platform",
+  "description": "A modern, video-focused streaming platform with professional HTML5 and HLS playback, secure authentication, admin video management, playlist organization, and responsive playback controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

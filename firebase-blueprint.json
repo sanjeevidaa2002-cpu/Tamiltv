@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin designation record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["admin", "superadmin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Video streaming catalog item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 2048 },
+        "videoUrl": { "type": "string", "maxLength": 2048 },
+        "sourceType": { "type": "string", "enum": ["direct", "hls", "upload"] },
+        "duration": { "type": "number" },
+        "duration_seconds": { "type": "number" },
+        "duration_formatted": { "type": "string", "maxLength": 32 },
+        "visibility": { "type": "string", "enum": ["public", "unlisted", "private"] },
+        "status": { "type": "string", "enum": ["draft", "published", "unpublished"] },
+        "playlistId": { "type": "string", "maxLength": 128 },
+        "sectionIds": { "type": "array" },
+        "views": { "type": "number" },
+        "tags": { "type": "array" },
+        "category": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "uploadedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["title", "videoUrl", "sourceType", "visibility", "status", "views"]
+    },
+    "Section": {
+      "title": "Section",
+      "description": "Dynamic category and content section",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "slug": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "icon": { "type": "string", "maxLength": 64 },
+        "thumbnail": { "type": "string", "maxLength": 2048 },
+        "color": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["enabled", "disabled"] },
+        "display_order": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "status", "display_order"]
+    },
+    "VideoSection": {
+      "title": "VideoSection",
+      "description": "Many-to-many relationship mapping between videos and sections",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 256 },
+        "video_id": { "type": "string", "maxLength": 128 },
+        "section_id": { "type": "string", "maxLength": 128 },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["video_id", "section_id"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "Video playlist collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 2048 },
+        "videoIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["published", "unpublished", "draft"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["title", "status"]
+    },
+    "WatchProgress": {
+      "title": "WatchProgress",
+      "description": "Saved playback progress for continuing watching",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "progressSeconds": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "progressSeconds"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Platform settings",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string", "maxLength": 128 },
+        "siteLogo": { "type": "string", "maxLength": 2048 },
+        "favicon": { "type": "string", "maxLength": 2048 },
+        "primaryColor": { "type": "string", "maxLength": 32 },
+        "secondaryColor": { "type": "string", "maxLength": 32 },
+        "defaultThumbnail": { "type": "string", "maxLength": 2048 },
+        "registrationEnabled": { "type": "boolean" },
+        "maintenanceMode": { "type": "boolean" },
+        "defaultVisibility": { "type": "string", "enum": ["public", "unlisted", "private"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["siteName"]
+    },
+    "Advertisement": {
+      "title": "Advertisement",
+      "description": "Adsterra and custom advertising slots configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "provider": { "type": "string", "enum": ["adsterra", "custom", "adsense"] },
+        "type": { "type": "string", "enum": ["header", "footer", "popup", "in_content", "video_player"] },
+        "banner_size": { "type": "string", "maxLength": 64 },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "ad_width": { "type": "number" },
+        "ad_height": { "type": "number" },
+        "custom_width": { "type": "number" },
+        "custom_height": { "type": "number" },
+        "code": { "type": "string", "maxLength": 50000 },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "target_pages": { "type": "array" },
+        "device_target": { "type": "string", "enum": ["all", "desktop", "mobile", "tablet"] },
+        "frequency_mode": { "type": "string", "enum": ["every_minutes", "every_hours", "once_per_session", "once_per_day", "custom"] },
+        "frequency_value": { "type": "number" },
+        "frequency_unit": { "type": "string", "enum": ["minutes", "hours"] },
+        "initial_delay": { "type": "number" },
+        "countdown_seconds": { "type": "number" },
+        "close_button_enabled": { "type": "boolean" },
+        "rotation_enabled": { "type": "boolean" },
+        "rotation_interval": { "type": "number" },
+        "priority": { "type": "number" },
+        "start_date": { "type": "string" },
+        "end_date": { "type": "string" },
+        "impressions": { "type": "number" },
+        "clicks": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "provider", "type", "status", "priority"]
+    },
+    "AdSettings": {
+      "title": "AdSettings",
+      "description": "Global ad engine switches and default parameters",
+      "type": "object",
+      "properties": {
+        "ads_enabled": { "type": "boolean" },
+        "header_ads_enabled": { "type": "boolean" },
+        "footer_ads_enabled": { "type": "boolean" },
+        "popup_ads_enabled": { "type": "boolean" },
+        "video_ads_enabled": { "type": "boolean" },
+        "default_popup_frequency_mode": { "type": "string", "enum": ["every_minutes", "every_hours", "once_per_session", "once_per_day", "custom"] },
+        "default_popup_frequency_value": { "type": "number" },
+        "default_popup_frequency_unit": { "type": "string", "enum": ["minutes", "hours"] },
+        "default_popup_delay": { "type": "number" },
+        "default_countdown_seconds": { "type": "number" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ads_enabled"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile records"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "Admin authorization mapping"
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/Video" },
+      "description": "Master video library"
+    },
+    "/playlists/{playlistId}": {
+      "schema": { "$ref": "#/entities/Playlist" },
+      "description": "Playlists for organizing video collections"
+    },
+    "/watch_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/WatchProgress" },
+      "description": "User playback position tracker"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/Settings" },
+      "description": "Platform wide settings"
+    },
+    "/sections/{sectionId}": {
+      "schema": { "$ref": "#/entities/Section" },
+      "description": "Dynamic categories and site sections"
+    },
+    "/video_sections/{videoSectionId}": {
+      "schema": { "$ref": "#/entities/VideoSection" },
+      "description": "Relational link between videos and sections"
+    },
+    "/ads/{adId}": {
+      "schema": { "$ref": "#/entities/Advertisement" },
+      "description": "Advertisement slots and provider code configurations"
+    },
+    "/ad_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AdSettings" },
+      "description": "Global advertisement switches and frequency defaults"
+    }
+  }
+}
