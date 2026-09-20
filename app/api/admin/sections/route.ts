@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSection, getSections, reorderSections } from '@/lib/videoService';
+import { verifyServerAdminSession } from '@/lib/adminAuth';
 
 export async function GET() {
   try {
@@ -14,6 +15,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     if (!body.name || !body.name.trim()) {
@@ -31,6 +37,11 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   // Reorder endpoint
   try {
     const body = await request.json();

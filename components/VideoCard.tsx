@@ -55,11 +55,20 @@ export function VideoCard({ video, priority = false }: VideoCardProps) {
           </div>
         </div>
 
-        {/* Stream Type Badge */}
-        {video.sourceType === 'hls' ? (
+        {/* Stream Type / Live / Provider Badge */}
+        {video.isLive || video.liveStatus === 'live' ? (
+          <div className="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-red-600/50 backdrop-blur-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+            <span>LIVE</span>
+          </div>
+        ) : video.sourceType === 'hls' ? (
           <div className="absolute left-2.5 top-2.5 flex items-center gap-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black backdrop-blur-sm">
             <Radio className="h-3 w-3 animate-pulse" />
             <span>HLS</span>
+          </div>
+        ) : video.provider ? (
+          <div className="absolute left-2.5 top-2.5 rounded bg-zinc-900/85 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-zinc-300 backdrop-blur-sm border border-white/10">
+            {video.provider}
           </div>
         ) : (
           <div className="absolute left-2.5 top-2.5 rounded bg-zinc-900/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-300 backdrop-blur-sm">
@@ -67,21 +76,27 @@ export function VideoCard({ video, priority = false }: VideoCardProps) {
           </div>
         )}
 
-        {/* Category / Section tag if present */}
-        {video.category && (
+        {/* Season & Episode or Category tag if present */}
+        {video.seasonNumber && video.episodeNumber ? (
+          <div className="absolute right-2.5 top-2.5 rounded bg-red-950/80 border border-red-800/50 px-2 py-0.5 text-[11px] font-semibold text-red-200 backdrop-blur-sm">
+            S{video.seasonNumber}:E{video.episodeNumber}
+          </div>
+        ) : video.category ? (
           <div className="absolute right-2.5 top-2.5 rounded bg-black/70 px-2 py-0.5 text-[11px] font-medium text-zinc-300 backdrop-blur-sm">
             {video.category}
           </div>
-        )}
+        ) : null}
 
         {/* Real Video Duration Badge */}
-        <div
-          id={`video-duration-${video.id}`}
-          className="absolute bottom-2.5 right-2.5 flex items-center gap-1 rounded bg-black/80 px-2 py-0.5 text-xs font-semibold text-white shadow-md backdrop-blur-sm"
-        >
-          <Clock className="h-3 w-3 text-zinc-300" />
-          <span>{formatDuration(effectiveDuration)}</span>
-        </div>
+        {video.isLive || video.liveStatus === 'live' ? null : (
+          <div
+            id={`video-duration-${video.id}`}
+            className="absolute bottom-2.5 right-2.5 flex items-center gap-1 rounded bg-black/80 px-2 py-0.5 text-xs font-semibold text-white shadow-md backdrop-blur-sm"
+          >
+            <Clock className="h-3 w-3 text-zinc-300" />
+            <span>{formatDuration(effectiveDuration)}</span>
+          </div>
+        )}
       </div>
 
       {/* Video Info Details */}

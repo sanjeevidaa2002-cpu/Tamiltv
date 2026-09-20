@@ -1,12 +1,12 @@
 {
-  "projectId": "project-a8237edf-5d2a-413d-83d",
-  "appId": "1:290290867595:web:6956f39c9baba1ccd5238e",
-  "apiKey": "AIzaSyAQLG1z20ZNf5UCQDjhh4WRpW0yBsg_gCw",
-  "authDomain": "project-a8237edf-5d2a-413d-83d.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-3b708595-6468-43bc-9484-7b89180f273a",
-  "storageBucket": "project-a8237edf-5d2a-413d-83d.firebasestorage.app",
-  "messagingSenderId": "290290867595",
+  "projectId": "acoustic-smithy-p8chg",
+  "appId": "1:11923542653:web:08c378132fc2a4683b1714",
+  "apiKey": "AIzaSyCK0h4WVGjMlpz7wHRPMlml66JpJGQJ2ko",
+  "authDomain": "acoustic-smithy-p8chg.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-tamiltv-2fe5eca8-aa53-4a21-93b0-01b283a66631",
+  "storageBucket": "acoustic-smithy-p8chg.firebasestorage.app",
+  "messagingSenderId": "11923542653",
   "measurementId": "",
-  "oAuthClientId": "290290867595-pnuu4makju2mk89bcdpk23sq0d5m7g7c.apps.googleusercontent.com",
+  "oAuthClientId": "11923542653-ju8n9hb7rhbd838g5cikpl09kltv3sfd.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { toggleSectionStatus } from '@/lib/videoService';
+import { verifyServerAdminSession } from '@/lib/adminAuth';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await verifyServerAdminSession();
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+    }
     const { id } = await params;
     const body = await request.json();
     const status = body.status;

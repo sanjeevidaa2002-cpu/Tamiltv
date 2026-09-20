@@ -27,6 +27,7 @@ interface AuthContextType {
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (e: string, p: string) => Promise<void>;
   registerWithEmail: (e: string, p: string, name: string) => Promise<void>;
+  loginAsDemo: (role?: 'user' | 'admin') => Promise<void>;
   logout: () => Promise<void>;
   sendResetEmail: (e: string) => Promise<void>;
   claimAdminAccess: () => Promise<boolean>;
@@ -114,9 +115,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await signInWithPopup(auth, googleProvider);
       setIsAuthModalOpen(false);
-    } catch (error) {
-      console.error('Google sign-in failed:', error);
+    } catch (error: any) {
+      const code = error?.code || '';
+      const msg = error?.message || String(error);
+
+      if (code === 'auth/unauthorized-domain' || msg.includes('auth/unauthorized-domain')) {
+        console.warn(
+          '[Auth] Google Sign-In requires domain authorization in Firebase Console (Authentication > Settings > Authorized domains).'
+        );
+        const domainErr = new Error(
+          'Firebase domain unauthorized: This deployment domain has not been added to your Firebase Authentication Authorized Domains list yet. Please sign in with Email & Password or authorize this domain in Firebase Console.'
+        );
+        (domainErr as any).code = 'auth/unauthorized-domain';
+        throw domainErr;
+      }
+
+      if (code === 'auth/popup-closed-by-user' || msg.includes('popup-closed')) {
+        const cancelErr = new Error('Sign-in cancelled by user.');
+        (cancelErr as any).code = 'auth/popup-closed-by-user';
+        throw cancelErr;
+      }
+
+      console.warn('[Auth] Google sign-in note:', msg);
       throw error;
+    }
+  };
+
+  const loginAsDemo = async (role: 'user' | 'admin' = 'user') => {
+    setLoading(true);
+    const email = role === 'admin' ? 'sanjeevidaa16@gmail.com' : 'viewer.demo@stream.com';
+    const pass = 'demo123456';
+    const displayName = role === 'admin' ? 'Sanjeevi (Admin)' : 'Demo Viewer';
+
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+      setIsAuthModalOpen(false);
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (
+        code === 'auth/user-not-found' ||
+        code === 'auth/invalid-credential' ||
+        code === 'auth/invalid-login-credentials'
+      ) {
+        try {
+          const res = await createUserWithEmailAndPassword(auth, email, pass);
+          if (res.user) {
+            await updateProfile(res.user, { displayName });
+            if (role === 'admin') {
+              try {
+                await setDoc(doc(db, 'admins', res.user.uid), {
+                  uid: res.user.uid,
+                  email: res.user.email,
+                  role: 'superadmin',
+                  createdAt: new Date().toISOString(),
+                }, { merge: true });
+              } catch (adminDocErr) {
+                console.warn('Admin record sync note:', adminDocErr);
+              }
+            }
+          }
+          setIsAuthModalOpen(false);
+        } catch (createErr: any) {
+          if (createErr?.code === 'auth/email-already-in-use') {
+            await signInWithEmailAndPassword(auth, email, pass);
+            setIsAuthModalOpen(false);
+          } else {
+            console.warn('[Auth] Demo account setup note:', createErr?.message);
+            throw createErr;
+          }
+        }
+      } else {
+        console.warn('[Auth] Demo login note:', err?.message);
+        throw err;
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -193,6 +266,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loginWithGoogle,
         loginWithEmail,
         registerWithEmail,
+        loginAsDemo,
         logout,
         sendResetEmail,
         claimAdminAccess,

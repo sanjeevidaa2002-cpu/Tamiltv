@@ -949,3 +949,39 @@ export async function updateSiteSettings(settings: Partial<SiteSettings>): Promi
 // Re-export duration detection utilities for convenience
 export { detectDurationFromFile, detectDurationFromUrl } from '@/lib/formatters';
 
+/**
+ * Checks if a video has already been imported with a given source or embed URL.
+ */
+export async function findVideoBySourceUrl(sourceUrl: string): Promise<Video | null> {
+  if (!sourceUrl || !sourceUrl.trim()) return null;
+  const trimmed = sourceUrl.trim();
+  try {
+    const videos = await getVideos(true);
+    const existing = videos.find((v) => {
+      if (v.sourceUrl && v.sourceUrl.trim().toLowerCase() === trimmed.toLowerCase()) return true;
+      if (v.videoUrl && v.videoUrl.trim().toLowerCase() === trimmed.toLowerCase()) return true;
+      if (v.embedUrl && v.embedUrl.trim().toLowerCase() === trimmed.toLowerCase()) return true;
+      return false;
+    });
+    return existing || null;
+  } catch (error) {
+    console.warn('Could not check for duplicate video source URL:', error);
+    return null;
+  }
+}
+
+/**
+ * Gets all external/imported videos for the import history tab.
+ */
+export async function getImportedVideos(): Promise<Video[]> {
+  try {
+    const allVideos = await getVideos(true);
+    return allVideos.filter(
+      (v) => v.provider || v.sourceType === 'authorized_embed' || v.sourceUrl
+    );
+  } catch (error) {
+    console.warn('Could not get imported videos list:', error);
+    return [];
+  }
+}
+

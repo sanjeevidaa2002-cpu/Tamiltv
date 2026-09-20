@@ -191,6 +191,39 @@ function WatchContent() {
 
           {/* Video Metadata Header */}
           <div className="mt-4">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {video.isLive || video.liveStatus === 'live' ? (
+                <span className="flex items-center gap-1.5 rounded-md bg-red-600 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-red-600/30">
+                  <span className="h-2 w-2 rounded-full bg-white animate-ping" />
+                  LIVE NOW
+                </span>
+              ) : null}
+
+              {video.provider && (
+                <span className="rounded-md bg-zinc-800 border border-zinc-700/60 px-2.5 py-0.5 text-xs font-semibold text-zinc-200">
+                  {video.provider}
+                </span>
+              )}
+
+              {video.contentType && (
+                <span className="rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-0.5 text-xs font-medium uppercase tracking-wider text-zinc-400">
+                  {video.contentType}
+                </span>
+              )}
+
+              {video.seasonNumber && video.episodeNumber ? (
+                <span className="rounded-md bg-red-950/80 border border-red-800/60 px-2.5 py-0.5 text-xs font-semibold text-red-200">
+                  Season {video.seasonNumber}, Episode {video.episodeNumber}
+                </span>
+              ) : null}
+
+              {video.language && (
+                <span className="rounded-md bg-zinc-900 border border-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+                  {video.language}
+                </span>
+              )}
+            </div>
+
             <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
               {video.title}
             </h1>

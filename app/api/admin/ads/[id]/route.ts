@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAd, updateAd, deleteAd, toggleAdStatus, duplicateAd } from '@/lib/adService';
+import { verifyServerAdminSession } from '@/lib/adminAuth';
 
 export async function GET(
   _request: NextRequest,
@@ -21,6 +22,11 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -35,6 +41,11 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   try {
     const { id } = await params;
     await deleteAd(id);
@@ -48,6 +59,11 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   try {
     const { id } = await params;
     const body = await request.json();

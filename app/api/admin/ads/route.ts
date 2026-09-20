@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAds, createAd, getAdSettings } from '@/lib/adService';
+import { verifyServerAdminSession } from '@/lib/adminAuth';
 
 export async function GET() {
   try {
@@ -17,6 +18,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await verifyServerAdminSession();
+  if (!session.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Admin session required' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     if (!body.name || !body.name.trim()) {

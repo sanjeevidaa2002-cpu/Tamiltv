@@ -217,22 +217,6 @@ export function Navbar({
         <div className="hidden md:flex items-center gap-3">
           {user ? (
             <>
-              {isAdmin && (
-                <Link
-                  id="nav-admin-link"
-                  href="/admin"
-                  className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition hover:opacity-90"
-                  style={{
-                    borderColor: `${primaryColor}50`,
-                    backgroundColor: `${primaryColor}15`,
-                    color: primaryColor,
-                  }}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>Admin Panel</span>
-                </Link>
-              )}
-
               {showProfile && (
                 <div
                   className="flex items-center gap-2 pl-2 border-l"
@@ -358,21 +342,6 @@ export function Navbar({
                   </p>
                 </div>
               </div>
-
-              {isAdmin && (
-                <Link
-                  href="/admin"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold"
-                  style={{
-                    backgroundColor: `${primaryColor}20`,
-                    color: primaryColor,
-                  }}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>Admin Panel</span>
-                </Link>
-              )}
 
               <button
                 type="button"

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { X, Mail, Lock, User as UserIcon, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, AlertCircle, CheckCircle2, Copy, Check } from 'lucide-react';
 
 export function AuthModal() {
   const router = useRouter();
@@ -27,6 +27,7 @@ export function AuthModal() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   if (!isAuthModalOpen) return null;
 
@@ -95,8 +96,17 @@ export function AuthModal() {
       await loginWithGoogle();
       handlePostAuthSuccess();
     } catch (err: unknown) {
-      console.error('Google Sign In Error:', err);
-      setError('Google Sign-In was cancelled or failed.');
+      const errorObj = err as any;
+      const msg = errorObj?.message || String(err);
+      if (errorObj?.code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain') || msg.includes('AUTH_UNAUTHORIZED_DOMAIN')) {
+        setError(
+          'Google Sign-In is restricted because this deployment domain is not yet authorized in Firebase Console. Please sign in with Email & Password or authorize this domain in Firebase.'
+        );
+      } else if (errorObj?.code === 'auth/popup-closed-by-user' || msg.includes('popup-closed')) {
+        setError('Google sign-in window was closed.');
+      } else {
+        setError(msg || 'Google Sign-In was cancelled or failed.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -132,9 +142,41 @@ export function AuthModal() {
 
         {/* Feedback Alert */}
         {error && (
-          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-400">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span>{error}</span>
+                {error.includes('Firebase') && typeof window !== 'undefined' && (
+                  <div className="mt-2.5 rounded-lg border border-red-500/20 bg-zinc-950/70 p-2 text-[11px] text-zinc-300">
+                    <span className="font-semibold text-zinc-200">To authorize this domain in Firebase:</span>
+                    <ol className="list-decimal ml-4 mt-1 space-y-1 text-zinc-400">
+                      <li>Go to Firebase Console &rarr; Authentication &rarr; Settings &rarr; Authorized domains</li>
+                      <li className="flex items-center gap-1.5 flex-wrap">
+                        <span>Add domain:</span>
+                        <code className="text-red-300 font-mono bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 select-all font-semibold">
+                          {window.location.hostname}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof navigator !== 'undefined') {
+                              navigator.clipboard.writeText(window.location.hostname);
+                              setCopiedDomain(true);
+                              setTimeout(() => setCopiedDomain(false), 2000);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-200 hover:bg-zinc-700 transition"
+                        >
+                          {copiedDomain ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                          <span>{copiedDomain ? 'Copied' : 'Copy Domain'}</span>
+                        </button>
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

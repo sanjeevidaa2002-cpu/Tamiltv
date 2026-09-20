@@ -1,6 +1,8 @@
-export type VideoSourceType = 'direct' | 'hls' | 'upload';
+export type VideoSourceType = 'direct' | 'hls' | 'upload' | 'authorized_embed';
 export type VideoVisibility = 'public' | 'unlisted' | 'private';
 export type VideoStatus = 'draft' | 'published' | 'unpublished';
+export type VideoContentType = 'movie' | 'episode' | 'series' | 'live' | 'video' | 'unknown';
+export type VideoLiveStatus = 'live' | 'upcoming' | 'offline' | 'unknown';
 
 export interface Section {
   id: string;
@@ -43,6 +45,18 @@ export interface Video {
   createdAt: string;
   updatedAt: string;
   uploadedBy?: string;
+  // External Provider & JioHotstar Import metadata fields
+  provider?: string;
+  sourceUrl?: string;
+  embedUrl?: string;
+  contentType?: VideoContentType;
+  isLive?: boolean;
+  liveStatus?: VideoLiveStatus;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  seriesName?: string;
+  language?: string;
+  releaseDate?: string;
 }
 
 export interface Playlist {
@@ -322,5 +336,48 @@ export interface AdSettings {
   default_popup_delay: number;
   default_countdown_seconds: number;
   updated_at?: string;
+}
+
+export interface ExternalStreamInspectionResult {
+  title: string;
+  description: string;
+  thumbnail: string;
+  duration?: number;
+  contentType: VideoContentType | string;
+  isLive: boolean;
+  liveStatus?: string;
+  provider: string;
+  providerUrl?: string;
+  sourceUrl: string;
+  embedUrl: string;
+  sourceType: VideoSourceType;
+  authorized: boolean;
+  publishedDate?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  seriesName?: string;
+  language?: string;
+}
+
+export interface JioHotstarMetadata {
+  title: string;
+  description: string;
+  thumbnailUrl: string;
+  duration: number; // in seconds
+  durationFormatted?: string;
+  contentType: VideoContentType;
+  provider: string;
+  sourceUrl: string;
+  embedUrl?: string;
+  isLive: boolean;
+  liveStatus: VideoLiveStatus;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  seriesName?: string;
+  language?: string;
+  category?: string;
+  tags?: string[];
+  releaseDate?: string;
+  raw?: Record<string, any>;
 }
 

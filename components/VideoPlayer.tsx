@@ -23,9 +23,22 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-export function getEmbedInfo(url: string) {
+export function getEmbedInfo(url: string, video?: Video) {
+  if (video?.embedUrl) {
+    return {
+      type: video.provider || 'embed',
+      embedUrl: video.embedUrl,
+    };
+  }
+  if (video?.sourceType === 'authorized_embed' && (video.videoUrl || video.sourceUrl)) {
+    return {
+      type: video.provider || 'embed',
+      embedUrl: video.embedUrl || video.videoUrl || video.sourceUrl || '',
+    };
+  }
   if (!url) return null;
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i);
+
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i);
   if (ytMatch && ytMatch[1]) {
     return {
       type: 'youtube' as const,
@@ -39,6 +52,32 @@ export function getEmbedInfo(url: string) {
       embedUrl: `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=1`,
     };
   }
+  const twitchMatch = url.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i);
+  if (twitchMatch) {
+    if (twitchMatch[1]) {
+      return {
+        type: 'twitch' as const,
+        embedUrl: `https://player.twitch.tv/?video=${twitchMatch[1]}&parent=${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}&autoplay=true`,
+      };
+    } else if (twitchMatch[2] && !['directory', 'p', 'downloads', 'jobs'].includes(twitchMatch[2])) {
+      return {
+        type: 'twitch' as const,
+        embedUrl: `https://player.twitch.tv/?channel=${twitchMatch[2]}&parent=${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}&autoplay=true`,
+      };
+    }
+  }
+
+  // Hotstar / JioHotstar Content ID match
+  if (url.includes('hotstar.com') || url.includes('jiohotstar.com')) {
+    const idMatch = url.match(/\/(\d{8,12})(?:\/|$|\?)/);
+    if (idMatch && idMatch[1]) {
+      return {
+        type: 'jiohotstar' as const,
+        embedUrl: `https://www.hotstar.com/embed/${idMatch[1]}`,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -83,7 +122,7 @@ export function VideoPlayer({
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<'rewind' | 'forward' | null>(null);
   const [promptResume, setPromptResume] = useState(initialProgress > 10);
 
-  const embedInfo = useMemo(() => getEmbedInfo(video.videoUrl), [video.videoUrl]);
+  const embedInfo = useMemo(() => getEmbedInfo(video.videoUrl, video), [video]);
   const [prevVideoUrl, setPrevVideoUrl] = useState(video.videoUrl);
 
   if (video.videoUrl !== prevVideoUrl) {
@@ -409,13 +448,45 @@ export function VideoPlayer({
     >
       {embedInfo ? (
         <div className="relative h-full w-full bg-black flex items-center justify-center">
-          <iframe
-            src={embedInfo.embedUrl}
-            title={video.title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            className="h-full w-full border-0"
-          />
+          {video.liveStatus === 'offline' ? (
+            <div className="flex flex-col items-center justify-center p-6 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800 text-zinc-400 mb-3">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <h4 className="text-sm font-bold text-white">Stream is Currently Offline</h4>
+              <p className="mt-1 text-xs text-zinc-400 max-w-sm">
+                The broadcaster has paused or ended this live transmission. Please check back later.
+              </p>
+              <a
+                href={video.sourceUrl || video.videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 hover:text-white transition"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open on {video.provider || 'Provider'}
+              </a>
+            </div>
+          ) : (
+            <>
+              <iframe
+                src={embedInfo.embedUrl}
+                title={video.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                className="h-full w-full border-0"
+              />
+              {/* Provider Badge Tag */}
+              {video.provider && (
+                <div className="absolute top-3 left-3 pointer-events-none z-10 flex items-center gap-1.5 rounded-md bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-zinc-300 backdrop-blur-md border border-white/10">
+                  {video.isLive || video.liveStatus === 'live' ? (
+                    <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping mr-0.5" />
+                  ) : null}
+                  <span>{video.provider}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
       ) : (
         <>

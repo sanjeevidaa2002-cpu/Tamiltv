@@ -1,7 +1,23 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { getStorage } from 'firebase/storage';
+import firebaseConfigFile from '../firebase-applet-config.json';
+
+// Support both environment variable overrides and the provisioned firebase-applet-config.json
+const resolvedConfig = {
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfigFile.projectId,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || firebaseConfigFile.appId,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || firebaseConfigFile.apiKey,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || firebaseConfigFile.authDomain,
+  firestoreDatabaseId: process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigFile.firestoreDatabaseId || '(default)',
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || firebaseConfigFile.storageBucket,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigFile.messagingSenderId,
+};
+
+if (!resolvedConfig.projectId || !resolvedConfig.apiKey) {
+  console.error('Firebase configuration is missing or incomplete. Check environment variables or firebase-applet-config.json.');
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -30,7 +46,7 @@ export interface FirestoreErrorInfo {
 }
 
 export const ADMIN_PRIMARY_EMAIL = 'titangaming4m@gmail.com';
-export const ADMIN_EMAILS = ['titangaming4m@gmail.com', 'titangaming5m@gmail.com'];
+export const ADMIN_EMAILS = ['titangaming4m@gmail.com', 'titangaming5m@gmail.com', 'sanjeevidaa16@gmail.com'];
 
 export function isUserAdmin(email?: string | null): boolean {
   if (!email) return false;
@@ -38,9 +54,10 @@ export function isUserAdmin(email?: string | null): boolean {
   return ADMIN_EMAILS.some(adminEmail => adminEmail.toLowerCase().trim() === cleanEmail);
 }
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const app = getApps().length > 0 ? getApp() : initializeApp(resolvedConfig);
+export const db = getFirestore(app, resolvedConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
