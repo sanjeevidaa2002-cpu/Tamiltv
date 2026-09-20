@@ -182,6 +182,12 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   },
   defaultThumbnail: 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800&auto=format&fit=crop&q=80',
   registrationEnabled: true,
+  googleLoginEnabled: true,
+  authSettings: {
+    googleLoginEnabled: true,
+    emailLoginEnabled: true,
+    registrationEnabled: true,
+  },
   maintenanceMode: false,
   defaultVisibility: 'public',
   storageConfig: {
@@ -227,6 +233,16 @@ export async function seedInitialDataToFirestore(): Promise<{ success: boolean; 
 
     // 5. Seed Settings
     batch.set(doc(db, 'settings', 'main'), cleanFirestoreData(DEFAULT_SETTINGS), { merge: true });
+    batch.set(
+      doc(db, 'settings', 'authentication'),
+      cleanFirestoreData({
+        googleLoginEnabled: true,
+        emailLoginEnabled: true,
+        registrationEnabled: true,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
 
     await batch.commit();
     isSeeded = true;

@@ -125,11 +125,25 @@
         "secondaryColor": { "type": "string", "maxLength": 32 },
         "defaultThumbnail": { "type": "string", "maxLength": 2048 },
         "registrationEnabled": { "type": "boolean" },
+        "googleLoginEnabled": { "type": "boolean" },
         "maintenanceMode": { "type": "boolean" },
         "defaultVisibility": { "type": "string", "enum": ["public", "unlisted", "private"] },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["siteName"]
+    },
+    "AuthenticationSettings": {
+      "title": "AuthenticationSettings",
+      "description": "Authentication configuration switches and OAuth provider settings",
+      "type": "object",
+      "properties": {
+        "googleLoginEnabled": { "type": "boolean" },
+        "emailLoginEnabled": { "type": "boolean" },
+        "registrationEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["googleLoginEnabled"]
     },
     "Advertisement": {
       "title": "Advertisement",

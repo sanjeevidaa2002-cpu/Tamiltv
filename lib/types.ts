@@ -206,6 +206,14 @@ export interface SiteThemeSettings {
   hoverColor?: string;
 }
 
+export interface AuthenticationSettings {
+  googleLoginEnabled: boolean;
+  emailLoginEnabled?: boolean;
+  registrationEnabled?: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export interface SiteSettings {
   siteName: string;
   siteShortName?: string;
@@ -238,6 +246,8 @@ export interface SiteSettings {
   loadingSettings?: LoadingScreenSettings;
   defaultThumbnail?: string;
   registrationEnabled: boolean;
+  googleLoginEnabled?: boolean;
+  authSettings?: AuthenticationSettings;
   maintenanceMode: boolean;
   defaultVisibility: VideoVisibility;
   storageConfig?: {

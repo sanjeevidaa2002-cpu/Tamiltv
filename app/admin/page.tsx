@@ -20,7 +20,8 @@ import {
   assignVideoSections,
 } from '@/lib/videoService';
 import { detectDurationFromFile, detectDurationFromUrl } from '@/lib/formatters';
-import { Video, Playlist, SiteSettings, VideoVisibility, VideoStatus, VideoSourceType, Section } from '@/lib/types';
+import { Video, Playlist, SiteSettings, VideoVisibility, VideoStatus, VideoSourceType, Section, AuthenticationSettings } from '@/lib/types';
+import { getAuthSettings, updateAuthSettings, DEFAULT_AUTH_SETTINGS } from '@/lib/authSettingsService';
 import { formatDuration, formatViews, formatTimeAgo } from '@/components/VideoCard';
 import { AdminSectionManager } from '@/components/admin/AdminSectionManager';
 import { AdminBrandingManager } from '@/components/admin/AdminBrandingManager';
@@ -66,6 +67,11 @@ import {
   Palette,
   Megaphone,
   Loader2,
+  KeyRound,
+  Shield,
+  Power,
+  Globe,
+  Lock,
 } from 'lucide-react';
 
 type AdminTab =
@@ -98,6 +104,9 @@ export default function AdminPage() {
   const [sections, setSections] = useState<Section[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [settings, setSettings] = useState<SiteSettings | null>(null);
+  const [authSettings, setAuthSettingsState] = useState<AuthenticationSettings>(DEFAULT_AUTH_SETTINGS);
+  const [savingAuthSettings, setSavingAuthSettings] = useState(false);
+  const [settingsSubTab, setSettingsSubTab] = useState<'auth' | 'general' | 'storage'>('auth');
   const [loadingData, setLoadingData] = useState(true);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -186,27 +195,31 @@ export default function AdminPage() {
   const refreshData = useCallback(async () => {
     try {
       setLoadingData(true);
-      const [vList, pList, siteSettings, sList] = await Promise.all([
+      const [vList, pList, siteSettings, sList, authConfig] = await Promise.all([
         getVideos(true),
         getPlaylists(true),
         getSiteSettings(),
         getSections(true),
+        getAuthSettings(),
       ]);
       // If Firestore is still unpopulated, seed it directly
       if (isAdmin && vList.length === 0) {
         await seedInitialDataToFirestore();
-        const [seededVids, seededPlaylists, seededSections] = await Promise.all([
+        const [seededVids, seededPlaylists, seededSections, seededAuthConfig] = await Promise.all([
           getVideos(true),
           getPlaylists(true),
           getSections(true),
+          getAuthSettings(),
         ]);
         setVideos(seededVids);
         setPlaylists(seededPlaylists);
         setSections(seededSections);
+        setAuthSettingsState(seededAuthConfig);
       } else {
         setVideos(vList);
         setPlaylists(pList);
         setSections(sList);
+        setAuthSettingsState(authConfig);
       }
       setSettings(siteSettings);
     } catch (err) {
@@ -657,6 +670,68 @@ export default function AdminPage() {
       showToast('Site settings updated successfully');
     } catch (err) {
       showToast('Failed to save settings', 'error');
+    }
+  };
+
+  // Authentication Settings Save & Toggle Handlers
+  const handleSaveAuthSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setSavingAuthSettings(true);
+    try {
+      const updated = await updateAuthSettings(
+        {
+          googleLoginEnabled: authSettings.googleLoginEnabled,
+          emailLoginEnabled: authSettings.emailLoginEnabled ?? true,
+          registrationEnabled: authSettings.registrationEnabled ?? true,
+        },
+        admin?.username || 'admin'
+      );
+      setAuthSettingsState(updated);
+      if (settings) {
+        setSettings({ ...settings, googleLoginEnabled: updated.googleLoginEnabled, authSettings: updated });
+      }
+      showToast(
+        `Google Login is now ${updated.googleLoginEnabled ? 'ENABLED (ON)' : 'DISABLED (OFF)'} and updated across all devices!`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Failed to save auth settings:', err);
+      showToast('Failed to save authentication settings in Firebase.', 'error');
+    } finally {
+      setSavingAuthSettings(false);
+    }
+  };
+
+  const handleToggleGoogleLogin = async () => {
+    const nextState = !authSettings.googleLoginEnabled;
+    const optimistic = { ...authSettings, googleLoginEnabled: nextState };
+    setAuthSettingsState(optimistic);
+    setSavingAuthSettings(true);
+    try {
+      const updated = await updateAuthSettings(
+        {
+          googleLoginEnabled: nextState,
+          emailLoginEnabled: authSettings.emailLoginEnabled ?? true,
+          registrationEnabled: authSettings.registrationEnabled ?? true,
+        },
+        admin?.username || 'admin'
+      );
+      setAuthSettingsState(updated);
+      if (settings) {
+        setSettings({ ...settings, googleLoginEnabled: updated.googleLoginEnabled, authSettings: updated });
+      }
+      showToast(
+        `Google Login switched ${nextState ? 'ON' : 'OFF'}! Users will ${
+          nextState ? 'now see' : 'no longer see'
+        } Google sign-in buttons.`,
+        'success'
+      );
+    } catch (err) {
+      // Revert on failure
+      setAuthSettingsState(authSettings);
+      showToast('Failed to update Google Login status.', 'error');
+    } finally {
+      setSavingAuthSettings(false);
     }
   };
 
@@ -2238,13 +2313,268 @@ export default function AdminPage() {
 
           {/* TAB 7: SETTINGS */}
           {activeTab === 'settings' && (
-            <div className="max-w-2xl space-y-6">
-              <div>
-                <h1 className="text-xl font-bold tracking-tight text-white">Platform Settings</h1>
-                <p className="text-xs text-zinc-400 mt-0.5">Brand configuration, theme styling, and storage drivers.</p>
+            <div className="max-w-3xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-red-400 mb-1">
+                    <span>Admin Panel</span>
+                    <span>/</span>
+                    <span>Settings</span>
+                    <span>/</span>
+                    <span className="text-zinc-200">
+                      {settingsSubTab === 'auth'
+                        ? 'Authentication Settings'
+                        : settingsSubTab === 'general'
+                        ? 'General & Brand'
+                        : 'Storage Configuration'}
+                    </span>
+                  </div>
+                  <h1 className="text-xl font-bold tracking-tight text-white">Platform Settings</h1>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Manage Google authentication provider, sign-in methods, brand styling, and media storage.
+                  </p>
+                </div>
               </div>
 
-              {settings && (
+              {/* Sub-tab Navigation */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-3">
+                <button
+                  type="button"
+                  id="tab-auth-settings"
+                  onClick={() => setSettingsSubTab('auth')}
+                  className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
+                    settingsSubTab === 'auth'
+                      ? 'bg-red-600 text-white shadow-md shadow-red-950/40'
+                      : 'border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Authentication Settings</span>
+                  <span
+                    className={`ml-1 rounded-full px-1.5 py-0.2 text-[9px] font-bold ${
+                      authSettings.googleLoginEnabled
+                        ? 'bg-emerald-500/20 text-emerald-300'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {authSettings.googleLoginEnabled ? 'Google ON' : 'Google OFF'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  id="tab-general-settings"
+                  onClick={() => setSettingsSubTab('general')}
+                  className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
+                    settingsSubTab === 'general'
+                      ? 'bg-red-600 text-white shadow-md shadow-red-950/40'
+                      : 'border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Palette className="h-3.5 w-3.5" />
+                  <span>General & Branding</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="tab-storage-settings"
+                  onClick={() => setSettingsSubTab('storage')}
+                  className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
+                    settingsSubTab === 'storage'
+                      ? 'bg-red-600 text-white shadow-md shadow-red-950/40'
+                      : 'border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Storage & Drivers</span>
+                </button>
+              </div>
+
+              {/* SUB-SECTION 1: AUTHENTICATION SETTINGS */}
+              {settingsSubTab === 'auth' && (
+                <div className="space-y-6">
+                  {/* Google Login Setting Card */}
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 sm:p-6 space-y-5 shadow-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 border border-zinc-700 shadow-inner">
+                          <svg className="h-6 w-6" viewBox="0 0 24 24">
+                            <path
+                              fill="#4285F4"
+                              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            />
+                            <path
+                              fill="#34A853"
+                              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            />
+                            <path
+                              fill="#FBBC05"
+                              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                            />
+                            <path
+                              fill="#EA4335"
+                              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                            />
+                          </svg>
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold text-white flex items-center gap-2">
+                            Google Login
+                            <span className="text-xs font-normal text-zinc-400">OAuth Provider</span>
+                          </h2>
+                          <p className="text-xs text-zinc-400">
+                            Global master switch for Google authentication across all user interfaces.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Current Status Indicator */}
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold border transition ${
+                            authSettings.googleLoginEnabled
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-sm shadow-emerald-500/10'
+                              : 'border-zinc-700 bg-zinc-800 text-zinc-400'
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              authSettings.googleLoginEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
+                            }`}
+                          />
+                          <span>Status: {authSettings.googleLoginEnabled ? 'ON' : 'OFF'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Interactive Toggle Switch Row */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-950/70 p-4">
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-zinc-200">Toggle Google Login</span>
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                          {authSettings.googleLoginEnabled
+                            ? 'Google Login is currently ENABLED. Users will see Google sign-in/sign-up options across desktop, mobile, and dialogs.'
+                            : 'Google Login is currently DISABLED. All Google sign-in buttons are hidden site-wide. Users must authenticate with Email & Password.'}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button
+                          type="button"
+                          id="google-login-toggle"
+                          role="switch"
+                          aria-checked={authSettings.googleLoginEnabled}
+                          onClick={handleToggleGoogleLogin}
+                          disabled={savingAuthSettings}
+                          className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:opacity-50 ${
+                            authSettings.googleLoginEnabled ? 'bg-emerald-600' : 'bg-zinc-700'
+                          }`}
+                        >
+                          <span className="sr-only">Toggle Google Login</span>
+                          <span
+                            className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                              authSettings.googleLoginEnabled ? 'translate-x-7' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                        <span className="font-mono text-xs font-bold text-white min-w-[32px]">
+                          {authSettings.googleLoginEnabled ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Operational Details Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      <div
+                        className={`rounded-xl border p-3.5 space-y-1.5 transition ${
+                          authSettings.googleLoginEnabled
+                            ? 'border-emerald-500/20 bg-emerald-950/10'
+                            : 'border-zinc-800/60 bg-zinc-950/40 opacity-70'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-emerald-400">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>When Google Login is ON</span>
+                        </div>
+                        <ul className="text-[11px] text-zinc-400 space-y-1 list-disc list-inside">
+                          <li>Login page displays &quot;Continue with Google&quot;</li>
+                          <li>Signup page displays &quot;Sign Up with Google&quot;</li>
+                          <li>Watch dialogs show Google 1-click authentication</li>
+                          <li>Auto-creates verified user record on first sign-in</li>
+                        </ul>
+                      </div>
+
+                      <div
+                        className={`rounded-xl border p-3.5 space-y-1.5 transition ${
+                          !authSettings.googleLoginEnabled
+                            ? 'border-amber-500/20 bg-amber-950/10'
+                            : 'border-zinc-800/60 bg-zinc-950/40 opacity-70'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          <span>When Google Login is OFF</span>
+                        </div>
+                        <ul className="text-[11px] text-zinc-400 space-y-1 list-disc list-inside">
+                          <li>All Google login buttons are hidden site-wide</li>
+                          <li>Backend enforcement blocks unauthorized attempts</li>
+                          <li>Users log in/sign up using Email &amp; Password</li>
+                          <li>Admin credentials remain completely unaffected</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Save Settings Action Bar */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-zinc-800">
+                      <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                        <Globe className="h-3.5 w-3.5 text-zinc-500" />
+                        <span>Changes are stored permanently in Firebase Firestore (<code className="text-zinc-300 font-mono">settings/authentication</code>).</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        id="save-auth-settings-btn"
+                        onClick={() => handleSaveAuthSettings()}
+                        disabled={savingAuthSettings}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition disabled:opacity-50 shadow-lg shadow-red-950/50 cursor-pointer"
+                      >
+                        {savingAuthSettings ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Saving Settings...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-4 w-4" />
+                            <span>Save Settings</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fallback Email/Password Info Card */}
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5 flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0">
+                      <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                    </div>
+                    <div className="text-xs space-y-1">
+                      <div className="font-bold text-white flex items-center gap-2">
+                        <span>Email &amp; Password Authentication</span>
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-400 border border-emerald-500/20">
+                          Active Fallback
+                        </span>
+                      </div>
+                      <p className="text-zinc-400 text-[11px]">
+                        Standard Email and Password authentication remains enabled regardless of Google Login status, ensuring continuous platform access for all registered members.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-SECTION 2: GENERAL & BRANDING */}
+              {settingsSubTab === 'general' && settings && (
                 <form onSubmit={handleSaveSettings} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-300 mb-1">Platform Name</label>
@@ -2299,31 +2629,39 @@ export default function AdminPage() {
                     />
                   </div>
 
-                  {/* Storage driver status */}
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-1 text-xs">
-                    <span className="font-semibold text-zinc-300">Active Storage Configuration</span>
-                    <div className="flex items-center justify-between text-zinc-400">
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition cursor-pointer"
+                    >
+                      <Save className="h-4 w-4" />
+                      <span>Save Brand Settings</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* SUB-SECTION 3: STORAGE & DRIVERS */}
+              {settingsSubTab === 'storage' && settings && (
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6">
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 space-y-2 text-xs">
+                    <span className="font-semibold text-zinc-200">Active Storage Configuration</span>
+                    <div className="flex items-center justify-between text-zinc-400 pt-1">
                       <span>Driver:</span>
-                      <span className="font-mono text-red-400 uppercase">{settings.storageConfig?.driver || 'local'}</span>
+                      <span className="font-mono text-red-400 uppercase font-bold">{settings.storageConfig?.driver || 'local'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-zinc-400">
+                      <span>Database Engine:</span>
+                      <span className="font-mono text-zinc-200">Firebase Firestore</span>
                     </div>
                     <div className="flex items-center justify-between text-zinc-400">
                       <span>Status:</span>
                       <span className="text-emerald-400 flex items-center gap-1 font-semibold">
-                        <CheckCircle2 className="h-3 w-3" /> Connected
+                        <CheckCircle2 className="h-3 w-3" /> Connected &amp; Realtime Synced
                       </span>
                     </div>
                   </div>
-
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-500 transition"
-                    >
-                      <Save className="h-4 w-4" />
-                      <span>Save Configuration</span>
-                    </button>
-                  </div>
-                </form>
+                </div>
               )}
             </div>
           )}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import {
   User as FirebaseUser,
   onAuthStateChanged,
@@ -12,12 +12,17 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db, googleProvider, isUserAdmin } from '@/lib/firebase';
+import { auth, db, googleProvider, isUserAdmin, cleanFirestoreData } from '@/lib/firebase';
+import { AuthenticationSettings } from '@/lib/types';
+import { getAuthSettings, subscribeToAuthSettings, DEFAULT_AUTH_SETTINGS } from '@/lib/authSettingsService';
 
 interface AuthContextType {
   user: FirebaseUser | null;
   loading: boolean;
   isAdmin: boolean;
+  googleLoginEnabled: boolean;
+  authSettings: AuthenticationSettings;
+  authSettingsLoading: boolean;
   isAuthModalOpen: boolean;
   authModalMode: 'login' | 'signup' | 'forgot';
   openAuthModal: (mode?: 'login' | 'signup' | 'forgot', redirectVideoId?: string) => void;
@@ -39,9 +44,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [googleLoginEnabled, setGoogleLoginEnabled] = useState<boolean>(true);
+  const [authSettings, setAuthSettings] = useState<AuthenticationSettings>(DEFAULT_AUTH_SETTINGS);
+  const [authSettingsLoading, setAuthSettingsLoading] = useState<boolean>(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'forgot'>('login');
   const [redirectVideoId, setRedirectVideoId] = useState<string | null>(null);
+
+  // Real-time listener for Authentication Settings (e.g. googleLoginEnabled toggle)
+  useEffect(() => {
+    const unsubscribeAuthSettings = subscribeToAuthSettings((settings) => {
+      setAuthSettings(settings);
+      setGoogleLoginEnabled(settings.googleLoginEnabled);
+      setAuthSettingsLoading(false);
+    });
+
+    return () => unsubscribeAuthSettings();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -53,12 +72,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           adminStatus = true;
           // Auto-persist admin record in Firestore
           try {
-            await setDoc(doc(db, 'admins', currentUser.uid), {
-              uid: currentUser.uid,
-              email: currentUser.email,
-              role: 'superadmin',
-              createdAt: new Date().toISOString(),
-            }, { merge: true });
+            await setDoc(
+              doc(db, 'admins', currentUser.uid),
+              cleanFirestoreData({
+                uid: currentUser.uid,
+                email: currentUser.email,
+                role: 'superadmin',
+                createdAt: new Date().toISOString(),
+              }),
+              { merge: true }
+            );
           } catch (e) {
             console.warn('Admin record sync note:', e);
           }
@@ -76,13 +99,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Sync user profile in Firestore
         try {
-          await setDoc(doc(db, 'users', currentUser.uid), {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          const now = new Date().toISOString();
+          const userProfileData: Record<string, any> = {
             uid: currentUser.uid,
-            email: currentUser.email,
+            email: currentUser.email || '',
             displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
             photoURL: currentUser.photoURL || '',
-            lastLogin: new Date().toISOString(),
-          }, { merge: true });
+            lastLogin: now,
+            lastLoginAt: now,
+          };
+
+          if (!userDocSnap.exists() || !userDocSnap.data()?.createdAt) {
+            userProfileData.createdAt = now;
+          }
+
+          await setDoc(userDocRef, cleanFirestoreData(userProfileData), { merge: true });
         } catch (e) {
           console.warn('Could not sync user profile:', e);
         }
@@ -112,12 +145,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loginWithGoogle = async () => {
+    // 1. Application-level check: Verify Google Login is enabled in local state
+    if (!googleLoginEnabled) {
+      const err = new Error('Google Login is currently disabled by the administrator. Please use email and password.');
+      (err as any).code = 'auth/google-disabled';
+      throw err;
+    }
+
+    // 2. Server-level check: Fetch fresh settings directly from Firestore before showing popup
     try {
-      await signInWithPopup(auth, googleProvider);
+      const freshSettings = await getAuthSettings();
+      if (!freshSettings.googleLoginEnabled) {
+        setGoogleLoginEnabled(false);
+        setAuthSettings(freshSettings);
+        const err = new Error('Google Login is currently disabled by the administrator. Please use email and password.');
+        (err as any).code = 'auth/google-disabled';
+        throw err;
+      }
+    } catch (fetchErr: any) {
+      if (fetchErr?.code === 'auth/google-disabled') {
+        throw fetchErr;
+      }
+      console.warn('Settings pre-check failed, continuing with cached setting:', fetchErr);
+    }
+
+    // 3. Initiate Firebase Google Authentication
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const authenticatedUser = result.user;
+
+      // 4. Double check setting after popup completion
+      const postAuthSettings = await getAuthSettings();
+      if (!postAuthSettings.googleLoginEnabled) {
+        setGoogleLoginEnabled(false);
+        await signOut(auth);
+        const err = new Error('Google Login is currently disabled by the administrator. Please use email and password.');
+        (err as any).code = 'auth/google-disabled';
+        throw err;
+      }
+
+      // 5. Ensure profile is stored and synced without duplicate records
+      if (authenticatedUser) {
+        try {
+          const userDocRef = doc(db, 'users', authenticatedUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          const now = new Date().toISOString();
+          const profileData: Record<string, any> = {
+            uid: authenticatedUser.uid,
+            email: authenticatedUser.email || '',
+            displayName: authenticatedUser.displayName || authenticatedUser.email?.split('@')[0] || 'User',
+            photoURL: authenticatedUser.photoURL || '',
+            lastLogin: now,
+            lastLoginAt: now,
+          };
+
+          if (!userDocSnap.exists() || !userDocSnap.data()?.createdAt) {
+            profileData.createdAt = now;
+          }
+
+          await setDoc(userDocRef, cleanFirestoreData(profileData), { merge: true });
+        } catch (dbErr) {
+          console.warn('Could not write user profile after Google sign-in:', dbErr);
+        }
+      }
+
       setIsAuthModalOpen(false);
     } catch (error: any) {
       const code = error?.code || '';
       const msg = error?.message || String(error);
+
+      if (code === 'auth/google-disabled' || msg.includes('disabled by the administrator')) {
+        throw error;
+      }
 
       if (code === 'auth/unauthorized-domain' || msg.includes('auth/unauthorized-domain')) {
         console.warn(
@@ -136,7 +235,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw cancelErr;
       }
 
-      console.warn('[Auth] Google sign-in note:', msg);
+      if (code === 'auth/popup-blocked') {
+        const popupErr = new Error('Google Sign-In popup was blocked by your browser. Please allow popups for this site and try again.');
+        (popupErr as any).code = 'auth/popup-blocked';
+        throw popupErr;
+      }
+
+      if (code === 'auth/account-exists-with-different-credential') {
+        const accountErr = new Error('An account already exists with the same email address using a different sign-in method. Please sign in using your email and password.');
+        (accountErr as any).code = 'auth/account-exists-with-different-credential';
+        throw accountErr;
+      }
+
+      console.warn('[Auth] Google sign-in error:', msg);
       throw error;
     }
   };
@@ -257,6 +368,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         loading,
         isAdmin,
+        googleLoginEnabled,
+        authSettings,
+        authSettingsLoading,
         isAuthModalOpen,
         authModalMode,
         openAuthModal,

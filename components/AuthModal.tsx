@@ -14,6 +14,7 @@ export function AuthModal() {
     closeAuthModal,
     redirectVideoId,
     clearRedirectVideoId,
+    googleLoginEnabled,
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
@@ -188,7 +189,7 @@ export function AuthModal() {
         )}
 
         {/* Google OAuth Option */}
-        {authModalMode !== 'forgot' && (
+        {googleLoginEnabled && authModalMode !== 'forgot' && (
           <>
             <button
               type="button"
@@ -197,7 +198,7 @@ export function AuthModal() {
               disabled={submitting}
               className="flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700 bg-zinc-800/80 py-2.5 px-4 text-sm font-medium text-white transition hover:bg-zinc-700 hover:border-zinc-600 disabled:opacity-50"
             >
-              <svg className="h-4 w-4" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="#EA4335"
                   d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
@@ -215,7 +216,9 @@ export function AuthModal() {
                   d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.9C3.7 20.6 7.5 23.5 12 23.5z"
                 />
               </svg>
-              <span>Continue with Google</span>
+              <span>
+                {authModalMode === 'login' ? 'Sign in with Google' : authModalMode === 'signup' ? 'Sign up with Google' : 'Continue with Google'}
+              </span>
             </button>
 
             <div className="relative my-5 flex items-center justify-center">
